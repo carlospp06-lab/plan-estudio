@@ -223,7 +223,7 @@ function undoDone(sid){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.0.0';
+const APP_VERSION='1.1.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -274,23 +274,54 @@ function exportData(){
   try{localStorage.setItem(KEY+'-ultima-exportacion',today())}catch(e){}
   toast('Copia descargada');render();
 }
-function importData(file){
+/* Dos tipos de archivo:
+   - Copia completa ({data:{subjects,settings,log}}): sustituye todo (pide confirmación).
+   - Archivo de asignaturas ({type:'subjects',subjects:[…]}): las AÑADE. Si ya existe una
+     asignatura con el mismo nombre, actualiza su temario y conserva lo ya estudiado. */
+const normName=s=>String(s||'').trim().toLowerCase();
+function mergeSubjects(list){
+  const added=[],updated=[];
+  for(const raw of list){
+    if(!raw||!raw.name)continue;
+    const topics=(raw.topics||[]).filter(t=>t&&t.name).map(t=>({...t,id:t.id||uid(),hours:Math.max(0.5,+t.hours||defaultHours(raw)),studied:+t.studied||0}));
+    const old=state.subjects.find(s=>normName(s.name)===normName(raw.name));
+    if(old){
+      const prev=new Map(old.topics.map(t=>[normName(t.name),t]));
+      topics.forEach(t=>{const p=prev.get(normName(t.name));if(p){t.id=p.id;t.studied=Math.min(+p.studied||0,t.hours)}});
+      Object.assign(old,{...raw,id:old.id,color:old.color,reviewStudied:old.reviewStudied||0,topics});
+      updated.push(old.name);
+    }else{
+      const used=new Set(state.subjects.map(s=>s.color));
+      state.subjects.push({difficulty:3,priority:3,time:'',exam:'',reviewStudied:0,...raw,id:uid(),
+        color:raw.color||COLORS.find(c=>!used.has(c))||COLORS[state.subjects.length%COLORS.length],topics});
+      added.push(raw.name);
+    }
+  }
+  return {added,updated};
+}
+function readFile(file){
   const fr=new FileReader();
   fr.onload=()=>{
+    let parsed;try{parsed=JSON.parse(fr.result)}catch(e){toast('Ese archivo no es de Plan de Estudio');return}
+    try{localStorage.setItem(KEY+'-antes-de-importar',JSON.stringify(state))}catch(e){}
+    if(parsed&&(parsed.type==='subjects'||(Array.isArray(parsed.subjects)&&!parsed.data&&!parsed.settings))){
+      const {added,updated}=mergeSubjects(parsed.subjects||[]);
+      if(!added.length&&!updated.length){toast('El archivo no tiene asignaturas');return}
+      writeNow();render();
+      toast([added.length?'Añadida: '+added.join(', '):'',updated.length?'Actualizada: '+updated.join(', '):''].filter(Boolean).join(' · '));
+      return;
+    }
     try{
-      const parsed=JSON.parse(fr.result);const next=normalize(parsed);
-      if(!Array.isArray(next.subjects))throw 0;
-      try{localStorage.setItem(KEY+'-antes-de-importar',JSON.stringify(state))}catch(e){}
+      const next=normalize(parsed);if(!Array.isArray(next.subjects))throw 0;
+      if(state.subjects.length&&!confirm('Es una copia completa: se sustituirán todos tus datos actuales por los de la copia. ¿Continuar?'))return;
       state=next;writeNow();toast('Datos importados: '+state.subjects.length+' asignaturas');render();
-    }catch(e){toast('Ese archivo no es una copia de Plan de Estudio')}
+    }catch(e){toast('Ese archivo no es de Plan de Estudio')}
   };
   fr.readAsText(file);
 }
 function pickImport(){
-  const i=document.createElement('input');i.type='file';i.accept='application/json,.json';
-  i.onchange=()=>{const f=i.files[0];if(!f)return;
-    if(state.subjects.length&&!confirm('Se sustituirán tus datos actuales por los de la copia. ¿Continuar?'))return;
-    importData(f)};
+  const i=document.createElement('input');i.type='file';i.accept='application/json,.json,text/plain';
+  i.onchange=()=>{const f=i.files[0];if(f)readFile(f)};
   i.click();
 }
 
@@ -351,7 +382,7 @@ function vHoy(){
   return h+saveNote();
 }
 function emptyState(){return`<header class="stack" style="gap:8px"><span class="eyebrow">Plan de estudio</span><h1>Organiza tus exámenes <span class="hl">día a día</span></h1><p class="muted" style="margin:0">Añade cada asignatura con su temario y la fecha del examen. La app reparte las horas de estudio de cada día según la dificultad, la prioridad y el tiempo que tienes.</p></header>
-<div class="card empty"><strong>Aún no tienes asignaturas</strong><span class="muted">Empieza por la que tengas antes, por ejemplo Electrónica.</span><div class="row"><button class="primary" data-new>Añadir asignatura</button><button data-import>Importar copia</button><button data-example>Probar con un ejemplo</button></div></div>`+saveNote()}
+<div class="card empty"><strong>Aún no tienes asignaturas</strong><span class="muted">Empieza por la que tengas antes, por ejemplo Electrónica.</span><div class="row"><button class="primary" data-new>Añadir asignatura</button><button data-import>Importar archivo</button><button data-example>Probar con un ejemplo</button></div></div>`+saveNote()}
 function saveNote(){return`<p class="savestate">${storeMode==='local'?'Tus datos se guardan en este móvil y se conservan al actualizar la app.':''}</p>`}
 
 function vPlan(){
@@ -398,9 +429,9 @@ function vAjustes(){
   <section class="card"><h2>Margen antes del examen</h2><span class="muted">Con margen terminas el temario unos días antes y te quedan días para repasar o imprevistos.</span>
   <div class="seg" style="grid-template-columns:repeat(4,1fr)">${[0,0.1,0.2,0.3].map(m=>`<button data-margin="${m}" aria-pressed="${state.settings.margin===m}">${m?Math.round(m*100)+'%':'Sin'}</button>`).join('')}</div></section>
   ${!isStandalone()&&installEvt?`<section class="card"><h2>Instalar la app</h2><span class="muted">Añádela a la pantalla de inicio para abrirla como una app, también sin conexión.</span><div class="row"><button class="mark" data-install>Instalar</button></div></section>`:''}
-  <section class="card"><h2>Copia de seguridad</h2><span class="muted">Tus datos están en este móvil. Descarga una copia de vez en cuando, o antes de cambiar de móvil o borrar el navegador.</span>
+  <section class="card"><h2>Copia de seguridad</h2><span class="muted">Tus datos están en este móvil. Descarga una copia de vez en cuando, o antes de cambiar de móvil o borrar el navegador. «Importar archivo» sirve para una copia completa o para añadir asignaturas nuevas sin borrar las que ya tienes.</span>
   ${(()=>{let l=null;try{l=localStorage.getItem(KEY+'-ultima-exportacion')}catch(e){}return`<span class="savestate">${l?'Última copia: '+esc(fmtDate(l,{day:'numeric',month:'long'})):'Todavía no has descargado ninguna copia.'}</span>`})()}
-  <div class="row"><button data-export>Descargar copia</button><button data-import>Importar copia</button></div></section>
+  <div class="row"><button data-export>Descargar copia</button><button data-import>Importar archivo</button></div></section>
   <section class="card"><h2>Datos</h2>${saveNote()}<div id="wipe"><button class="danger" data-wipe>Borrar todos los datos</button></div></section>
   <p class="savestate">Plan de Estudio · versión <span class="num">${APP_VERSION}</span></p>`;
 }
