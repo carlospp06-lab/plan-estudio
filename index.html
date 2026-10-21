@@ -1,6 +1,7 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><title>Plan de Estudio</title>
 <meta name="theme-color" content="#F2F4EF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121411" media="(prefers-color-scheme: dark)">
+<script>try{var t=JSON.parse(localStorage.getItem('plan-estudio')||'{}').settings?.theme;if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <meta name="description" content="Reparte tus horas de estudio día a día según tus exámenes.">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
@@ -227,7 +228,7 @@ function undoDone(sid){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.3.0';
+const APP_VERSION='1.4.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -263,8 +264,16 @@ function loadLocal(){
     state=normalize(raw);
   }catch(e){toast('No se pudieron leer los datos guardados')}
 }
+/* Tema: 'auto' (sigue al móvil), 'light' o 'dark'. Se guarda con tus ajustes. */
+function applyTheme(){
+  const t=state.settings.theme||'auto',r=document.documentElement;
+  if(t==='auto')delete r.dataset.theme;else r.dataset.theme=t;
+  const dark=t==='dark'||(t==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name=theme-color]').forEach(m=>{m.content=dark?'#121411':'#F2F4EF';m.removeAttribute('media')});
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',()=>applyTheme());
 function initStore(){
-  storeMode='local';loadLocal();
+  storeMode='local';loadLocal();applyTheme();
   try{navigator.storage?.persist?.()}catch(e){}
   render();
 }
@@ -381,7 +390,7 @@ function vHoy(){
         <div class="row" style="justify-content:space-between"><span class="muted" style="font-size:.85rem">${s.exam===t?'Repaso antes del examen de las '+esc(s.time):'Examen '+until(s.exam)}</span>
         ${isDone&&logOpen!==s.id?`<button class="ghost" data-undo="${s.id}">✓ Hecho · Deshacer</button>`:''}</div>
         ${logOpen===s.id?`<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="eyebrow">¿Cuánto has estudiado?</span>
-          <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><button data-lstep="-0.25" aria-label="15 minutos menos">−15 min</button><span class="num" style="font-size:1.4rem">${fmtH(logVal)}</span><button data-lstep="0.25" aria-label="15 minutos más">+15 min</button></div>
+          <div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px"><button data-lstep="-0.25" aria-label="15 minutos menos" style="flex:none;white-space:nowrap;padding-inline:12px">−15'</button><span class="num" style="font-size:1.25rem;white-space:nowrap;text-align:center;flex:1">${fmtH(logVal)}</span><button data-lstep="0.25" aria-label="15 minutos más" style="flex:none;white-space:nowrap;padding-inline:12px">+15'</button></div>
           <div class="row"><button class="primary" data-lsave="${s.id}" style="flex:1">Guardar</button><button class="ghost" data-lcancel>Cancelar</button></div></div>`
         :!isDone?`<div class="row">${dH>0?`<button class="ghost" data-undo="${s.id}">Deshacer</button>`:''}<button data-logopen="${s.id}" data-h="${left}" style="flex:1">Registrar tiempo</button><button class="primary" data-done="${s.id}" data-h="${left}" style="flex:1">${dH>0?'Completar':'Hecho'}</button></div>`:''}
       </article>`}
@@ -428,6 +437,9 @@ function vAsig(){
 function vAjustes(){
   const H=state.settings.hours;const week=H.reduce((a,b)=>a+(+b||0),0);
   return`<header class="stack" style="gap:6px"><h1>Ajustes</h1><span class="muted">Cuánto tiempo puedes estudiar cada día de la semana. El plan nunca te pide más de esto.</span></header>
+  <section class="card"><h2>Apariencia</h2>
+  <div class="seg" style="grid-template-columns:repeat(3,1fr)">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([v,l])=>`<button data-theme-set="${v}" aria-pressed="${(state.settings.theme||'auto')===v}" style="font-family:var(--body);font-weight:700">${l}</button>`).join('')}</div>
+  <span class="muted" style="font-size:.85rem">Automático sigue el modo claro u oscuro de tu móvil.</span></section>
   <section class="card"><h2>Horas disponibles</h2>
   ${DOW.map((d,i)=>`<div class="row" style="justify-content:space-between"><label for="h${i}" style="text-transform:capitalize">${d}</label><div class="row" style="gap:6px"><button class="ghost" data-hstep="${i}" data-v="-0.5" aria-label="Menos tiempo el ${d}">−</button><input id="h${i}" data-hours="${i}" type="number" min="0" max="16" step="0.5" value="${H[i]}" style="width:80px;text-align:center" class="num"><button class="ghost" data-hstep="${i}" data-v="0.5" aria-label="Más tiempo el ${d}">+</button></div></div>`).join('')}
   <span class="muted">Total semanal: <span class="num">${fmtH(week)}</span></span></section>
@@ -545,6 +557,7 @@ document.addEventListener('click',e=>{
   if(ds.edit)return openEditor(ds.edit);
   if(ds.done)return markDone(ds.done,+ds.h);
   if(ds.undo)return undoDone(ds.undo);
+  if(ds.themeSet){state.settings.theme=ds.themeSet;applyTheme();save();return render()}
   if(ds.logopen){logOpen=ds.logopen;logVal=Math.max(0.25,Math.round(+ds.h*4)/4);return render()}
   if(ds.lstep){logVal=Math.max(0.25,Math.min(12,logVal+ +ds.lstep));return render()}
   if(ds.lsave)return markDone(ds.lsave,logVal);
@@ -555,7 +568,7 @@ document.addEventListener('click',e=>{
   if('import' in ds)return pickImport();
   if('install' in ds)return doInstall();
   if('wipe' in ds){$('#wipe').innerHTML='<span>¿Seguro? Se borran asignaturas, temas y progreso.</span><div class="row"><button class="danger" data-wipeok>Sí, borrar todo</button><button data-wipeno>Cancelar</button></div>';return}
-  if('wipeok' in ds){try{localStorage.setItem(KEY+'-antes-de-borrar',JSON.stringify(state))}catch(e){}state=structuredClone(DEFAULT);save();toast('Datos borrados');render();return}
+  if('wipeok' in ds){try{localStorage.setItem(KEY+'-antes-de-borrar',JSON.stringify(state))}catch(e){}const th=state.settings.theme;state=structuredClone(DEFAULT);state.settings.theme=th;save();toast('Datos borrados');render();return}
   if('wipeno' in ds)return render();
   // editor
   const s=editing&&findS(editing);if(!s)return;
