@@ -223,7 +223,7 @@ function undoDone(sid){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.1.0';
+const APP_VERSION='1.2.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -274,10 +274,12 @@ function exportData(){
   try{localStorage.setItem(KEY+'-ultima-exportacion',today())}catch(e){}
   toast('Copia descargada');render();
 }
-/* Dos tipos de archivo:
-   - Copia completa ({data:{subjects,settings,log}}): sustituye todo (pide confirmación).
-   - Archivo de asignaturas ({type:'subjects',subjects:[…]}): las AÑADE. Si ya existe una
-     asignatura con el mismo nombre, actualiza su temario y conserva lo ya estudiado. */
+/* Importar NUNCA borra nada. Sirve igual para un archivo de asignaturas
+   ({type:'subjects',subjects:[…]}) que para una copia completa ({data:{…}}):
+   - Asignatura nueva → se añade con su temario, fecha y hora del examen.
+   - Asignatura que ya existe (mismo nombre) → se actualiza su temario y fechas,
+     conservando lo ya estudiado y su color.
+   - Las demás asignaturas, los ajustes (horas disponibles) y el registro no se tocan. */
 const normName=s=>String(s||'').trim().toLowerCase();
 function mergeSubjects(list){
   const added=[],updated=[];
@@ -287,8 +289,8 @@ function mergeSubjects(list){
     const old=state.subjects.find(s=>normName(s.name)===normName(raw.name));
     if(old){
       const prev=new Map(old.topics.map(t=>[normName(t.name),t]));
-      topics.forEach(t=>{const p=prev.get(normName(t.name));if(p){t.id=p.id;t.studied=Math.min(+p.studied||0,t.hours)}});
-      Object.assign(old,{...raw,id:old.id,color:old.color,reviewStudied:old.reviewStudied||0,topics});
+      topics.forEach(t=>{const p=prev.get(normName(t.name));if(p){t.id=p.id;t.studied=Math.min(Math.max(+p.studied||0,+t.studied||0),t.hours)}});
+      Object.assign(old,{...raw,id:old.id,color:old.color,reviewStudied:Math.max(+old.reviewStudied||0,+raw.reviewStudied||0),topics});
       updated.push(old.name);
     }else{
       const used=new Set(state.subjects.map(s=>s.color));
@@ -304,18 +306,13 @@ function readFile(file){
   fr.onload=()=>{
     let parsed;try{parsed=JSON.parse(fr.result)}catch(e){toast('Ese archivo no es de Plan de Estudio');return}
     try{localStorage.setItem(KEY+'-antes-de-importar',JSON.stringify(state))}catch(e){}
-    if(parsed&&(parsed.type==='subjects'||(Array.isArray(parsed.subjects)&&!parsed.data&&!parsed.settings))){
-      const {added,updated}=mergeSubjects(parsed.subjects||[]);
-      if(!added.length&&!updated.length){toast('El archivo no tiene asignaturas');return}
-      writeNow();render();
-      toast([added.length?'Añadida: '+added.join(', '):'',updated.length?'Actualizada: '+updated.join(', '):''].filter(Boolean).join(' · '));
-      return;
-    }
-    try{
-      const next=normalize(parsed);if(!Array.isArray(next.subjects))throw 0;
-      if(state.subjects.length&&!confirm('Es una copia completa: se sustituirán todos tus datos actuales por los de la copia. ¿Continuar?'))return;
-      state=next;writeNow();toast('Datos importados: '+state.subjects.length+' asignaturas');render();
-    }catch(e){toast('Ese archivo no es de Plan de Estudio')}
+    const src=parsed?.data?.subjects?parsed.data:parsed;
+    const list=Array.isArray(src?.subjects)?src.subjects:Array.isArray(src)?src:null;
+    if(!list){toast('Ese archivo no es de Plan de Estudio');return}
+    const {added,updated}=mergeSubjects(list);
+    if(!added.length&&!updated.length){toast('El archivo no tiene asignaturas');return}
+    writeNow();render();
+    toast([added.length?'Añadida: '+added.join(', '):'',updated.length?'Actualizada: '+updated.join(', '):''].filter(Boolean).join(' · '));
   };
   fr.readAsText(file);
 }
@@ -429,7 +426,7 @@ function vAjustes(){
   <section class="card"><h2>Margen antes del examen</h2><span class="muted">Con margen terminas el temario unos días antes y te quedan días para repasar o imprevistos.</span>
   <div class="seg" style="grid-template-columns:repeat(4,1fr)">${[0,0.1,0.2,0.3].map(m=>`<button data-margin="${m}" aria-pressed="${state.settings.margin===m}">${m?Math.round(m*100)+'%':'Sin'}</button>`).join('')}</div></section>
   ${!isStandalone()&&installEvt?`<section class="card"><h2>Instalar la app</h2><span class="muted">Añádela a la pantalla de inicio para abrirla como una app, también sin conexión.</span><div class="row"><button class="mark" data-install>Instalar</button></div></section>`:''}
-  <section class="card"><h2>Copia de seguridad</h2><span class="muted">Tus datos están en este móvil. Descarga una copia de vez en cuando, o antes de cambiar de móvil o borrar el navegador. «Importar archivo» sirve para una copia completa o para añadir asignaturas nuevas sin borrar las que ya tienes.</span>
+  <section class="card"><h2>Copia de seguridad</h2><span class="muted">Tus datos están en este móvil. Descarga una copia de vez en cuando, o antes de cambiar de móvil o borrar el navegador. «Importar archivo» solo añade o actualiza asignaturas: nunca borra lo que ya tienes.</span>
   ${(()=>{let l=null;try{l=localStorage.getItem(KEY+'-ultima-exportacion')}catch(e){}return`<span class="savestate">${l?'Última copia: '+esc(fmtDate(l,{day:'numeric',month:'long'})):'Todavía no has descargado ninguna copia.'}</span>`})()}
   <div class="row"><button data-export>Descargar copia</button><button data-import>Importar archivo</button></div></section>
   <section class="card"><h2>Datos</h2>${saveNote()}<div id="wipe"><button class="danger" data-wipe>Borrar todos los datos</button></div></section>
