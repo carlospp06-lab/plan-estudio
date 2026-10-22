@@ -3,7 +3,7 @@
    - La página se pide primero a internet: si hay versión nueva, se usa en cuanto se abre.
    - Solo guarda CÓDIGO. Tus datos están en el almacenamiento del navegador y no se tocan.
    Al publicar una versión nueva, sube VERSION (y APP_VERSION en index.html). */
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const CACHE = 'plan-estudio-' + VERSION;
 const FONTS = 'plan-estudio-fuentes';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'];
@@ -57,4 +57,13 @@ self.addEventListener('fetch', e => {
     return;
   }
   e.respondWith(cacheFirst(req, CACHE));
+});
+
+/* Al tocar la notificación del temporizador, abre (o enfoca) la app. */
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) if ('focus' in c) return c.focus();
+    return self.clients.openWindow('./');
+  }));
 });

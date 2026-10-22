@@ -104,6 +104,20 @@ details summary{cursor:pointer;color:var(--muted);font-weight:700}
 details p{margin:4px 0 0}
 .analysis p{margin:0;font-size:.95rem}
 .omit{margin:0;padding-left:18px;color:var(--muted);font-size:.92rem;display:flex;flex-direction:column;gap:4px}
+.timer{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
+.timer.on{border-color:var(--c);box-shadow:inset 4px 0 0 var(--c)}
+.timer .clock{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:2.2rem;line-height:1;letter-spacing:-.02em}
+.timer .state{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.timer.on .state{color:var(--ok)}
+.timer .goal{font-size:.9rem;color:var(--muted)}
+.timer .goal.reached{color:var(--ok);font-weight:700}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:middle}
+@media (prefers-reduced-motion:no-preference){.pulse{animation:pl 1.4s ease-in-out infinite}@keyframes pl{50%{opacity:.25}}}
+#timerbar{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom,0px));z-index:6;background:var(--ink);color:var(--bg);display:flex;align-items:center;gap:10px;padding:8px max(16px,env(safe-area-inset-left,0px));font-weight:700}
+#timerbar .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#timerbar button{min-height:36px;padding:6px 12px;background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 40%,transparent)}
+body.has-timerbar main{padding-bottom:160px}
+body.has-timerbar .toast{bottom:calc(128px + env(safe-area-inset-bottom,0px))}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:700;z-index:30;max-width:calc(100% - 32px)}
 .big{font-family:var(--display);font-weight:800;font-size:2.6rem;line-height:1}
 .savestate{font-size:.78rem;color:var(--muted)}
@@ -120,6 +134,7 @@ details p{margin:4px 0 0}
 </nav>
 
 <div class="sheet" id="sheet" hidden></div>
+<div id="timerbar" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -211,7 +226,7 @@ function buildPlan(){
 /* Registra h horas de estudio hoy. Se puede llamar varias veces: el tiempo se acumula. */
 let logOpen=null, logVal=0;
 function markDone(sid,h){
-  h=Math.round((+h||0)*4)/4;if(h<=0)return;
+  h=Math.round((+h||0)*60)/60;if(h<=0)return;
   const s=findS(sid), t=today();let left=h;const d=[];
   for(const tp of s.topics){const r=Math.max(0,(+tp.hours||0)-(+tp.studied||0));if(r<=0)continue;const a=Math.min(r,left);tp.studied=(+tp.studied||0)+a;d.push([tp.id,a]);left-=a;if(left<=1e-6)break}
   if(left>1e-6){s.reviewStudied=(+s.reviewStudied||0)+left;d.push(['__rev',left])}
@@ -224,11 +239,95 @@ function undoDone(sid){
   delete state.log[t][sid];logOpen=null;save();toast('Registro de hoy deshecho');render();
 }
 
+/* ---------- temporizador ----------
+   Guarda solo marcas de tiempo (no cuenta segundos), así sigue contando aunque cierres la app
+   o el móvil la congele en segundo plano. state.timer = {sid, start|null, acc(ms), notified} */
+let tickT=null, goalT=null;
+const tElapsed=()=>{const T=state.timer;if(!T)return 0;return (T.acc||0)+(T.start?Date.now()-T.start:0)};
+const fmtClock=ms=>{const t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=t%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(x).padStart(2,'0')};
+function todayLeft(sid){const it=(buildPlan().days[0]?.items||[]).find(x=>x.sid===sid);if(!it)return 0;return Math.max(0,it.h-(state.log[today()]?.[sid]?.h||0))}
+async function swReg(){try{return 'serviceWorker' in navigator?await navigator.serviceWorker.getRegistration():null}catch(e){return null}}
+async function notify(title,body,opts={}){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const r=await swReg();const o={body,icon:'icons/icon-192.png',badge:'icons/icon-192.png',tag:'plan-timer',lang:'es',...opts};
+  try{if(r)await r.showNotification(title,o);else new Notification(title,o)}catch(e){}
+}
+async function clearNotify(){const r=await swReg();try{(await r?.getNotifications({tag:'plan-timer'}))?.forEach(n=>n.close())}catch(e){}}
+function timerNotify(){
+  const T=state.timer;if(!T){clearNotify();return}const s=findS(T.sid);if(!s)return;
+  const goal=T.goalH*3600e3;
+  if(T.start){
+    const end=new Date(Date.now()+Math.max(0,goal-tElapsed()));
+    notify('Estudiando '+s.name,(goal>tElapsed()?'Objetivo de hoy hacia las '+end.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'Objetivo de hoy cumplido')+' · Toca para abrir',{silent:true,renotify:false,requireInteraction:true,timestamp:T.start-(T.acc||0)});
+  }else notify('En pausa: '+s.name,'Llevas '+fmtH(tElapsed()/3600e3)+'. Toca para reanudar.',{silent:true,requireInteraction:true});
+}
+function scheduleGoal(){
+  clearTimeout(goalT);const T=state.timer;if(!T||!T.start||T.notified)return;
+  const ms=T.goalH*3600e3-tElapsed();
+  if(ms<=0){goalReached();return}
+  goalT=setTimeout(goalReached,Math.min(ms,2**31-1));
+}
+function goalReached(){
+  const T=state.timer;if(!T||T.notified)return;T.notified=true;writeNow();
+  const s=findS(T.sid);try{navigator.vibrate?.([200,100,200])}catch(e){}
+  if(document.visibilityState==='visible')toast('¡Objetivo de hoy cumplido en '+(s?.name||'')+'!');
+  notify('Objetivo cumplido: '+(s?.name||''),'Ya llevas el tiempo previsto para hoy. Para el temporizador para registrarlo.',{tag:'plan-timer',renotify:true,silent:false,requireInteraction:true});
+}
+async function askNotify(){
+  if(!('Notification' in window)||Notification.permission!=='default')return;
+  try{await Notification.requestPermission()}catch(e){}
+}
+function timerStart(sid){
+  const T=state.timer;
+  if(T&&T.sid!==sid){const ms=tElapsed();const old=T.sid;state.timer=null;if(ms>=60e3)markDone(old,ms/3600e3)}
+  if(state.timer?.sid===sid){state.timer.start=Date.now()}
+  else state.timer={sid,start:Date.now(),acc:0,goalH:todayLeft(sid),notified:false};
+  writeNow();askNotify().then(timerNotify);scheduleGoal();render();
+}
+function timerPause(){const T=state.timer;if(!T||!T.start)return;T.acc=tElapsed();T.start=null;clearTimeout(goalT);writeNow();timerNotify();render()}
+function timerStop(){
+  const T=state.timer;if(!T)return;const ms=tElapsed();state.timer=null;clearTimeout(goalT);writeNow();clearNotify();
+  if(ms<60e3){toast('Menos de 1 minuto: no se registra');render();return}
+  markDone(T.sid,ms/3600e3);
+}
+function timerDiscard(){if(!state.timer)return;if(!confirm('¿Descartar el tiempo del temporizador sin registrarlo?'))return;state.timer=null;clearTimeout(goalT);writeNow();clearNotify();toast('Temporizador descartado');render()}
+function timerBlock(s,left){
+  const T=state.timer, mine=T&&T.sid===s.id;
+  if(!mine)return `<div class="row"><button class="mark" data-tstart="${s.id}" style="flex:1">▶ Empezar a estudiar</button></div>`;
+  const el=tElapsed(), goal=T.goalH*3600e3, rem=goal-el;
+  return `<div class="timer ${T.start?'on':''}">
+    <div class="row" style="justify-content:space-between;align-items:flex-end"><div class="stack" style="gap:4px"><span class="state">${T.start?'<span class="pulse"></span>Estudiando':'En pausa'}</span><span class="clock" data-tclock>${fmtClock(el)}</span></div>
+    <button class="ghost" data-tdiscard aria-label="Descartar temporizador" title="Descartar">✕</button></div>
+    ${goal>0?`<div class="bar" aria-hidden="true"><span data-tbar style="width:${Math.min(100,el/goal*100)}%;background:var(--c)"></span></div>`:''}
+    <span class="goal ${goal>0&&rem<=0?'reached':''}" data-tgoal>${goal>0?(rem>0?'Quedan '+fmtClock(rem)+' para el objetivo de hoy':'Objetivo de hoy cumplido · '+fmtClock(-rem)+' extra'):'Tiempo extra para hoy'}</span>
+    <div class="row">${T.start?`<button data-tpause style="flex:1">❚❚ Pausar</button>`:`<button class="mark" data-tstart="${s.id}" style="flex:1">▶ Reanudar</button>`}<button class="primary" data-tstop style="flex:1;white-space:nowrap">■ Parar</button></div>
+  </div>`;
+}
+function timerBar(){
+  const b=$('#timerbar'),T=state.timer,s=T&&findS(T.sid);
+  const show=!!(s&&!(tab==='hoy'&&!editing));
+  document.body.classList.toggle('has-timerbar',show);
+  if(!show){b.hidden=true;return}
+  b.hidden=false;b.style.setProperty('--c',s.color);
+  b.innerHTML=`<span class="nm">${T.start?'<span class="pulse"></span>':'❚❚ '}${esc(s.name)}</span><span class="num" data-tclock>${fmtClock(tElapsed())}</span>${T.start?'<button data-tpause>Pausar</button>':`<button data-tstart="${s.id}">Reanudar</button>`}<button data-tstop>Parar</button>`;
+}
+function tick(){
+  const T=state.timer;
+  document.querySelectorAll('[data-tclock]').forEach(e=>e.textContent=fmtClock(tElapsed()));
+  if(T){const goal=T.goalH*3600e3,el=tElapsed(),rem=goal-el;
+    document.querySelectorAll('[data-tbar]').forEach(e=>e.style.width=Math.min(100,goal?el/goal*100:0)+'%');
+    document.querySelectorAll('[data-tgoal]').forEach(e=>{if(goal>0){e.textContent=rem>0?'Quedan '+fmtClock(rem)+' para el objetivo de hoy':'Objetivo de hoy cumplido · '+fmtClock(-rem)+' extra';e.classList.toggle('reached',rem<=0)}});
+    if(T.start&&!T.notified&&goal>0&&rem<=0)goalReached();
+  }
+}
+function startTicker(){clearInterval(tickT);tickT=setInterval(()=>{if(state.timer?.start&&document.visibilityState==='visible')tick()},1000)}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&state.timer){tick();scheduleGoal()}});
+
 /* ---------- guardado ----------
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.5.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -273,7 +372,7 @@ function applyTheme(){
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',()=>applyTheme());
 function initStore(){
-  storeMode='local';loadLocal();applyTheme();
+  storeMode='local';loadLocal();applyTheme();startTicker();if(state.timer){scheduleGoal()}
   try{navigator.storage?.persist?.()}catch(e){}
   render();
 }
@@ -386,6 +485,7 @@ function vHoy(){
         <div class="row" style="justify-content:space-between"><h3>${esc(s.name)}</h3><span class="num" style="font-size:1.1rem">${fmtH(it.h)}</span></div>
         ${dH>0&&!isDone?`<div class="bar" aria-hidden="true"><span style="width:${dH/it.h*100}%;background:var(--c)"></span></div><span class="muted" style="font-size:.9rem">Llevas <span class="num">${fmtH(dH)}</span> · quedan <span class="num">${fmtH(left)}</span></span>`:''}
         ${isDone&&dH>it.h+0.01?`<span class="muted" style="font-size:.9rem">Has hecho <span class="num">${fmtH(dH)}</span>, más de lo previsto</span>`:''}
+        ${!isDone||state.timer?.sid===s.id?timerBlock(s,left):''}
         ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus?`<span class="topics">${esc(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where">Apuntes: ${esc(x.t.where)}</span>`:''}</li>`).join('')}</ul>`:''}
         <div class="row" style="justify-content:space-between"><span class="muted" style="font-size:.85rem">${s.exam===t?'Repaso antes del examen de las '+esc(s.time):'Examen '+until(s.exam)}</span>
         ${isDone&&logOpen!==s.id?`<button class="ghost" data-undo="${s.id}">✓ Hecho · Deshacer</button>`:''}</div>
@@ -547,6 +647,7 @@ function render(){
   const v={hoy:vHoy,plan:vPlan,asig:vAsig,ajustes:vAjustes}[tab]();
   $('#view').innerHTML=storeMode==='cargando'?'<p class="muted">Cargando tu plan…</p>':v;
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===tab?'page':'false'));
+  timerBar();
 }
 
 document.addEventListener('click',e=>{
@@ -557,6 +658,10 @@ document.addEventListener('click',e=>{
   if(ds.edit)return openEditor(ds.edit);
   if(ds.done)return markDone(ds.done,+ds.h);
   if(ds.undo)return undoDone(ds.undo);
+  if(ds.tstart)return timerStart(ds.tstart);
+  if('tpause' in ds)return timerPause();
+  if('tstop' in ds)return timerStop();
+  if('tdiscard' in ds)return timerDiscard();
   if(ds.themeSet){state.settings.theme=ds.themeSet;applyTheme();save();return render()}
   if(ds.logopen){logOpen=ds.logopen;logVal=Math.max(0.25,Math.round(+ds.h*4)/4);return render()}
   if(ds.lstep){logVal=Math.max(0.25,Math.min(12,logVal+ +ds.lstep));return render()}
