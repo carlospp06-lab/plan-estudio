@@ -410,7 +410,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.7.0';
+const APP_VERSION='1.8.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -482,6 +482,10 @@ function mergeSubjects(list){
     if(!raw||!raw.name)continue;
     const topics=(raw.topics||[]).filter(t=>t&&t.name).map(t=>({...t,id:t.id||uid(),hours:Math.max(0.5,+t.hours||defaultHours(raw)),studied:+t.studied||0}));
     const old=state.subjects.find(s=>normName(s.name)===normName(raw.name));
+    /* Actualización parcial: si el archivo no trae temas, se conservan los que ya hay
+       (sirve para cambiar solo la dificultad, la fecha, etc.). */
+    if(old&&!Array.isArray(raw.topics)){const {name,...rest}=raw;Object.assign(old,rest,{id:old.id,topics:old.topics});updated.push(old.name);continue}
+    if(!old&&!Array.isArray(raw.topics))continue;
     if(old){
       const prev=new Map(old.topics.map(t=>[normName(t.name),t]));
       topics.forEach(t=>{const p=prev.get(normName(t.name));if(p){t.id=p.id;t.studied=Math.min(Math.max(+p.studied||0,+t.studied||0),t.hours)}});
@@ -502,7 +506,7 @@ function readFile(file){
     let parsed;try{parsed=JSON.parse(fr.result)}catch(e){toast('Ese archivo no es de Plan de Estudio');return}
     try{localStorage.setItem(KEY+'-antes-de-importar',JSON.stringify(state))}catch(e){}
     const src=parsed?.data?.subjects?parsed.data:parsed;
-    const list=Array.isArray(src?.subjects)?src.subjects:Array.isArray(src)?src:null;
+    const list=Array.isArray(src?.subjects)?src.subjects:Array.isArray(src?.updates)?src.updates:Array.isArray(src)?src:null;
     if(!list){toast('Ese archivo no es de Plan de Estudio');return}
     const {added,updated}=mergeSubjects(list);
     if(!added.length&&!updated.length){toast('El archivo no tiene asignaturas');return}
@@ -653,6 +657,7 @@ function renderSheet(){
   <span class="muted" style="font-size:.85rem;margin-top:-8px">${s.time?'Ese día tendrás un repaso antes del examen.':'Pon la hora para aprovechar también el día del examen.'}</span>
   ${s.exam?`<a class="btn" href="${gcalLink(s)}" target="_blank" rel="noopener">Añadir examen a Google Calendar</a>`:''}
   <div class="stack" style="gap:6px"><span class="eyebrow">Dificultad</span><div class="seg">${[1,2,3,4,5].map(n=>`<button data-diff="${n}" aria-pressed="${s.difficulty===n}" aria-label="${DIFF[n-1]}">${n}</button>`).join('')}</div><div class="seg-l"><span>Muy fácil</span><span>${DIFF[s.difficulty-1]}</span><span>Muy difícil</span></div></div>
+  ${s.difficultyAI?`<div class="card" style="gap:4px;padding:12px 14px;margin-top:-6px"><span class="eyebrow">Dificultad estimada: ${s.difficultyAI}/5 · ${DIFF[s.difficultyAI-1]}</span>${s.difficultyNote?`<span class="muted" style="font-size:.88rem">${esc(s.difficultyNote)}</span>`:''}${s.difficulty!==s.difficultyAI?`<span class="savestate">Has puesto ${s.difficulty}/5. <button class="ghost" data-diff="${s.difficultyAI}" style="min-height:0;padding:0;font-size:.85rem;text-decoration:underline">Usar ${s.difficultyAI}</button></span>`:''}</div>`:''}
   <div class="stack" style="gap:6px"><span class="eyebrow">Prioridad</span><div class="seg">${[1,2,3,4,5].map(n=>`<button data-prio="${n}" aria-pressed="${s.priority===n}" aria-label="Prioridad ${PRIO[n-1]}">${n}</button>`).join('')}</div><div class="seg-l"><span>Mínima</span><span>${PRIO[s.priority-1]}</span><span>Máxima</span></div></div>
   <div class="stack" style="gap:6px"><span class="eyebrow">Color</span><div class="colors">${COLORS.map(c=>`<button style="--c:${c}" data-color="${c}" aria-pressed="${s.color===c}" aria-label="Color"></button>`).join('')}</div></div>
   ${s.analysis?`<section class="card analysis"><span class="eyebrow">Análisis de exámenes</span><p>${esc(s.analysis)}</p></section>`:''}
