@@ -118,6 +118,16 @@ details p{margin:4px 0 0}
 #timerbar button{min-height:36px;padding:6px 12px;background:transparent;color:var(--bg);border-color:color-mix(in srgb,var(--bg) 40%,transparent)}
 body.has-timerbar main{padding-bottom:160px}
 body.has-timerbar .toast{bottom:calc(128px + env(safe-area-inset-bottom,0px))}
+.splitbtn{min-height:40px;padding:6px 10px;gap:8px;font-size:.85rem;flex:none}
+.splitbtn .mini{display:flex;width:44px;height:8px;border-radius:99px;overflow:hidden;background:var(--line)}
+.splitbtn .mini span{display:block;height:100%}
+.chip.custom{background:var(--mark);color:var(--mark-ink);border-color:var(--mark)}
+.splitrow{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.splitrow:first-of-type{border-top:0}
+.splitrow .pct{font-family:var(--display);font-weight:800;font-size:1.6rem;line-height:1}
+.splitrow .ctl{display:flex;align-items:center;gap:6px}
+.splitrow .ctl button{min-width:56px;padding-inline:8px;white-space:nowrap}
+.splitrow .ctl .num{min-width:84px;text-align:center;font-size:1.05rem}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:700;z-index:30;max-width:calc(100% - 32px)}
 .big{font-family:var(--display);font-weight:800;font-size:2.6rem;line-height:1}
 .savestate{font-size:.78rem;color:var(--muted)}
@@ -134,6 +144,7 @@ body.has-timerbar .toast{bottom:calc(128px + env(safe-area-inset-bottom,0px))}
 </nav>
 
 <div class="sheet" id="sheet" hidden></div>
+<div class="sheet" id="split" hidden></div>
 <div id="timerbar" hidden></div>
 <div class="toast" id="toast" hidden></div>
 
@@ -195,6 +206,14 @@ function buildPlan(){
   const days=[];
   for(let d=t;d<last;d=addDays(d,1)){
     const cap=+H[dow(d)]||0, day={date:d,cap,items:[],over:0};
+    /* Reparto elegido a mano para este día: state.overrides[fecha] = {idAsignatura: horas}.
+       Lo que no se estudia ese día queda pendiente y se reparte en los días siguientes. */
+    const ov=state.overrides?.[d];
+    if(cap>0&&ov){
+      day.custom=true;
+      subs.forEach(s=>{if(!(s.exam>d||(s.exam===d&&examWindow(s,d)>=0.25)))return;let h=Math.min(+ov[s.id]||0,rem[s.id]);if(s.exam===d)h=Math.min(h,examWindow(s,d));if(h<0.01)return;rem[s.id]=Math.max(0,rem[s.id]-h);day.items.push({sid:s.id,h})});
+      day.items.sort((a,b)=>b.h-a.h);days.push(day);continue;
+    }
     if(cap>0){
       const act=subs.filter(s=>rem[s.id]>0.01&&(s.exam>d||(s.exam===d&&examWindow(s,d)>=0.25))).map(s=>{
         const n=left(s,d), eff=Math.max(1,n*(1-margin));
@@ -330,15 +349,72 @@ function tick(){
 function startTicker(){clearInterval(tickT);tickT=setInterval(()=>{if(state.timer?.start&&document.visibilityState==='visible')tick()},1000)}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&state.timer){tick();scheduleGoal()}});
 
+/* ---------- reparto del día (porcentajes) ----------
+   El total del día se mantiene: al subir una asignatura 15 min se quitan a otra. */
+let splitDate=null, splitDraft=null, splitTotal=0, splitMin={}, splitMax={};
+function splitCandidates(d){return state.subjects.filter(s=>s.exam&&s.topics.length&&(s.exam>d||(s.exam===d&&examWindow(s,d)>=0.25))&&(remaining(s)+(d===today()?(state.log[today()]?.[s.id]?.h||0):0))>0.01)}
+function openSplit(d){
+  const day=buildPlan().days.find(x=>x.date===d);if(!day||!day.cap){toast('Ese día no tienes horas de estudio');return}
+  splitDate=d;splitDraft={};splitMin={};splitMax={};
+  const tl=d===today()?(state.log[d]||{}):{};
+  for(const s of splitCandidates(d)){
+    splitDraft[s.id]=day.items.find(i=>i.sid===s.id)?.h||0;
+    splitMin[s.id]=Math.ceil((tl[s.id]?.h||0)*4)/4;
+    splitMax[s.id]=remaining(s)+(tl[s.id]?.h||0);
+  }
+  splitTotal=Object.values(splitDraft).reduce((a,b)=>a+b,0);
+  if(splitTotal<0.25)splitTotal=day.cap;
+  renderSplit();
+}
+function closeSplit(){splitDate=null;$('#split').hidden=true;document.body.style.overflow='';render()}
+function splitStep(sid,dv){
+  const ids=Object.keys(splitDraft), q=x=>Math.round(x*4)/4;
+  if(dv>0){
+    if(splitDraft[sid]+dv>splitMax[sid]+0.124){toast('No le queda más temario pendiente');return}
+    const donor=ids.filter(i=>i!==sid&&splitDraft[i]-dv>=splitMin[i]-1e-6).sort((a,b)=>splitDraft[b]-splitDraft[a])[0];
+    if(!donor){toast('No hay tiempo de otra asignatura que mover');return}
+    splitDraft[donor]=q(splitDraft[donor]-dv);splitDraft[sid]=q(splitDraft[sid]+dv);
+  }else{
+    if(splitDraft[sid]+dv<splitMin[sid]-1e-6){toast('Hoy ya llevas '+fmtH(splitMin[sid])+' de esta asignatura');return}
+    const taker=ids.filter(i=>i!==sid&&splitDraft[i]-dv<=splitMax[i]+0.124).sort((a,b)=>splitDraft[b]-splitDraft[a])[0];
+    if(!taker){toast('Ninguna otra asignatura puede recibir ese tiempo');return}
+    splitDraft[taker]=q(splitDraft[taker]-dv);splitDraft[sid]=q(splitDraft[sid]+dv);
+  }
+  renderSplit();
+}
+function saveSplit(){(state.overrides??={})[splitDate]={...splitDraft};save();toast('Reparto guardado');closeSplit()}
+function resetSplit(){if(state.overrides)delete state.overrides[splitDate];save();toast('Reparto automático');closeSplit()}
+function renderSplit(){
+  const el=$('#split'),ids=Object.keys(splitDraft),tot=ids.reduce((a,i)=>a+splitDraft[i],0)||1;
+  const custom=!!state.overrides?.[splitDate];
+  el.innerHTML=`<main><div class="sheethead"><button class="ghost" data-splitclose>← Volver</button><span class="savestate">${custom?'Reparto a mano':'Reparto automático'}</span></div>
+  <header class="stack" style="gap:6px"><span class="eyebrow">${esc(fmtDate(splitDate,{weekday:'long',day:'numeric',month:'long'}))}</span><h1>Reparto <span class="hl">del día</span></h1>
+  <span class="muted">Mueve tiempo entre asignaturas en pasos de 15 min. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
+  <div class="bar" style="height:14px" aria-hidden="true">${ids.map(i=>`<span style="width:${splitDraft[i]/tot*100}%;background:${findS(i).color}"></span>`).join('')}</div>
+  <section class="card" style="padding-block:4px">${ids.map(i=>{const s=findS(i);return`<div class="splitrow">
+    <div style="min-width:0"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="dot" style="background:${s.color}"></span><strong style="min-width:0">${esc(s.name)}</strong></div><span class="muted" style="font-size:.85rem">Examen ${until(s.exam)}</span></div>
+    <span class="pct">${Math.round(splitDraft[i]/tot*100)}%</span>
+    <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sstep="${i}" data-v="-0.25" aria-label="15 minutos menos de ${esc(s.name)}">−15'</button><span class="num">${fmtH(splitDraft[i])}</span><button data-sstep="${i}" data-v="0.25" aria-label="15 minutos más de ${esc(s.name)}">+15'</button></div>
+  </div>`}).join('')}</section>
+  <div class="row"><button class="primary" data-splitsave style="flex:1">Guardar reparto</button>${custom?'<button data-splitreset>Volver al automático</button>':''}</div>
+  </main>`;
+  el.hidden=false;document.body.style.overflow='hidden';
+}
+function splitButton(d,items){
+  const tot=items.reduce((a,x)=>a+x.h,0);if(!tot)return'';
+  const custom=!!state.overrides?.[d];
+  return `<button class="splitbtn ${custom?'mark':''}" data-split="${d}" aria-label="Cambiar el reparto del día"><span class="mini">${items.map(x=>`<span style="width:${x.h/tot*100}%;background:${findS(x.sid).color}"></span>`).join('')}</span>${items.length>1?items.slice(0,3).map(x=>Math.round(x.h/tot*100)+'%').join(' · '):'Reparto'}</button>`;
+}
+
 /* ---------- guardado ----------
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.6.0';
+const APP_VERSION='1.7.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
-function prune(){const lim=addDays(today(),-60);for(const k of Object.keys(state.log))if(k<lim)delete state.log[k]}
+function prune(){const lim=addDays(today(),-60);for(const k of Object.keys(state.log))if(k<lim)delete state.log[k];if(state.overrides)for(const k of Object.keys(state.overrides))if(k<today())delete state.overrides[k]}
 function writeNow(){
   prune();state.schema=SCHEMA;
   try{
@@ -479,7 +555,7 @@ function vHoy(){
   const {days,unmet}=buildPlan();const day=days[0];const items=day?.items||[];
   const tl=state.log[t]||{};const total=items.reduce((a,x)=>a+x.h,0);const done=items.reduce((a,x)=>a+Math.min(x.h,tl[x.sid]?.h||0),0);
   const ne=nextExam();
-  let h=`<header class="stack" style="gap:6px"><span class="eyebrow">${esc(fmtDate(t,{weekday:'long',day:'numeric',month:'long'}))}</span>
+  let h=`<header class="stack" style="gap:6px"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span class="eyebrow">${esc(fmtDate(t,{weekday:'long',day:'numeric',month:'long'}))}</span>${day&&day.cap?splitButton(t,items):''}</div>
   ${items.length?`<h1>Hoy toca <span class="hl">${fmtH(total)}</span></h1><div class="bar" aria-hidden="true"><span style="width:${total?done/total*100:0}%;background:var(--ok)"></span></div><span class="muted">Hecho: <span class="num">${fmtH(done)}</span> de <span class="num">${fmtH(total)}</span></span>`
   :`<h1>${day&&day.cap===0?'Hoy es <span class="hl">día libre</span>':'Nada pendiente para hoy'}</h1><span class="muted">${state.subjects.some(s=>s.exam&&s.topics.length)?'Disfruta. El plan sigue mañana.':'Añade la fecha del examen y el temario de tus asignaturas para generar el plan.'}</span>`}
   </header>`;
@@ -518,7 +594,7 @@ function vPlan(){
   h+=`<section class="card" style="padding-block:4px">`;
   for(const d of show){const tot=d.items.reduce((a,x)=>a+x.h,0);
     h+=`<div class="dayrow"><div class="d">${esc(fmtDate(d.date,{weekday:'short'}))}<br>${pd(d.date).getDate()}<small>${esc(fmtDate(d.date,{month:'short'}))}</small></div><div style="min-width:0">
-    <div class="row" style="justify-content:space-between;gap:6px"><span class="num">${d.cap?fmtH(tot)+' / '+fmtH(d.cap):'Día libre'}</span>${d.over>0.05?'<span class="chip warn">Día cargado</span>':''}</div>
+    <div class="row" style="justify-content:space-between;gap:6px"><span class="num">${d.cap?fmtH(tot)+' / '+fmtH(d.cap):'Día libre'}</span><span class="row" style="gap:6px">${d.custom?'<span class="chip custom">A mano</span>':''}${d.over>0.05&&!d.custom?'<span class="chip warn">Día cargado</span>':''}${d.cap&&d.items.length?`<button class="ghost" data-split="${d.date}" style="min-height:32px;padding:4px 8px;font-size:.8rem">Ajustar</button>`:''}</span></div>
     ${d.cap?`<div class="bar" style="margin-top:6px">${d.items.map(x=>`<span style="width:${x.h/d.cap*100}%;background:${findS(x.sid).color}"></span>`).join('')}</div>`:''}
     <ul>${d.items.map(x=>{const s=findS(x.sid);return`<li><span class="dot" style="background:${s.color}"></span>${esc(s.name)}<span class="num">${fmtH(x.h)}</span></li>`}).join('')}
     ${(exams[d.date]||[]).map(s=>`<li><span class="chip exam">Examen${s.time?' '+esc(s.time):''}</span> ${esc(s.name)}</li>`).join('')}
@@ -665,6 +741,11 @@ document.addEventListener('click',e=>{
   if(ds.edit)return openEditor(ds.edit);
   if(ds.done)return markDone(ds.done,+ds.h);
   if(ds.undo)return undoDone(ds.undo);
+  if(ds.split)return openSplit(ds.split);
+  if('splitclose' in ds)return closeSplit();
+  if(ds.sstep)return splitStep(ds.sstep,+ds.v);
+  if('splitsave' in ds)return saveSplit();
+  if('splitreset' in ds)return resetSplit();
   if(ds.tstart)return timerStart(ds.tstart,ds.tunit||null,ds.tgoalh!=null&&ds.tgoalh!==''?+ds.tgoalh:null,ds.tuname||'');
   if('tpause' in ds)return timerPause();
   if('tstop' in ds)return timerStop();
