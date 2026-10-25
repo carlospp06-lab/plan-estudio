@@ -225,10 +225,12 @@ function buildPlan(){
 /* ---------- registrar estudio ---------- */
 /* Registra h horas de estudio hoy. Se puede llamar varias veces: el tiempo se acumula. */
 let logOpen=null, logVal=0;
-function markDone(sid,h){
+function markDone(sid,h,first){
   h=Math.round((+h||0)*60)/60;if(h<=0)return;
   const s=findS(sid), t=today();let left=h;const d=[];
-  for(const tp of s.topics){const r=Math.max(0,(+tp.hours||0)-(+tp.studied||0));if(r<=0)continue;const a=Math.min(r,left);tp.studied=(+tp.studied||0)+a;d.push([tp.id,a]);left-=a;if(left<=1e-6)break}
+  if(first&&first!=='__rev'){const tp=s.topics.find(x=>x.id===first);if(tp){const r=Math.max(0,(+tp.hours||0)-(+tp.studied||0));const a=Math.min(r,left);if(a>0){tp.studied=(+tp.studied||0)+a;d.push([tp.id,a]);left-=a}}}
+  if(first==='__rev'&&!s.noReview&&left>1e-6){const r=Math.max(0,reviewHours(s)-(+s.reviewStudied||0));const a=Math.min(r,left);if(a>0){s.reviewStudied=(+s.reviewStudied||0)+a;d.push(['__rev',a]);left-=a}}
+  if(left>1e-6)for(const tp of s.topics){const r=Math.max(0,(+tp.hours||0)-(+tp.studied||0));if(r<=0)continue;const a=Math.min(r,left);tp.studied=(+tp.studied||0)+a;d.push([tp.id,a]);left-=a;if(left<=1e-6)break}
   if(left>1e-6){s.reviewStudied=(+s.reviewStudied||0)+left;d.push(['__rev',left])}
   const L=(state.log[t]??={});if(L[sid]){L[sid].h+=h;L[sid].d.push(...d)}else L[sid]={h,d};
   logOpen=null;save();toast('Registrado: '+fmtH(h));render();
@@ -253,13 +255,14 @@ async function notify(title,body,opts={}){
   try{if(r)await r.showNotification(title,o);else new Notification(title,o)}catch(e){}
 }
 async function clearNotify(){const r=await swReg();try{(await r?.getNotifications({tag:'plan-timer'}))?.forEach(n=>n.close())}catch(e){}}
+const tLabel=T=>{const s=findS(T.sid);return (s?.name||'')+(T.uname?' · '+T.uname:'')};
 function timerNotify(){
-  const T=state.timer;if(!T){clearNotify();return}const s=findS(T.sid);if(!s)return;
+  const T=state.timer;if(!T){clearNotify();return}const s=findS(T.sid);if(!s)return;const nm=tLabel(T);
   const goal=T.goalH*3600e3;
   if(T.start){
     const end=new Date(Date.now()+Math.max(0,goal-tElapsed()));
-    notify('Estudiando '+s.name,(goal>tElapsed()?'Objetivo de hoy hacia las '+end.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'Objetivo de hoy cumplido')+' · Toca para abrir',{silent:true,renotify:false,requireInteraction:true,timestamp:T.start-(T.acc||0)});
-  }else notify('En pausa: '+s.name,'Llevas '+fmtH(tElapsed()/3600e3)+'. Toca para reanudar.',{silent:true,requireInteraction:true});
+    notify('Estudiando '+nm,(goal>tElapsed()?'Objetivo de hoy hacia las '+end.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'Objetivo de hoy cumplido')+' · Toca para abrir',{silent:true,renotify:false,requireInteraction:true,timestamp:T.start-(T.acc||0)});
+  }else notify('En pausa: '+nm,'Llevas '+fmtH(tElapsed()/3600e3)+'. Toca para reanudar.',{silent:true,requireInteraction:true});
 }
 function scheduleGoal(){
   clearTimeout(goalT);const T=state.timer;if(!T||!T.start||T.notified)return;
@@ -270,37 +273,41 @@ function scheduleGoal(){
 function goalReached(){
   const T=state.timer;if(!T||T.notified)return;T.notified=true;writeNow();
   const s=findS(T.sid);try{navigator.vibrate?.([200,100,200])}catch(e){}
-  if(document.visibilityState==='visible')toast('¡Objetivo de hoy cumplido en '+(s?.name||'')+'!');
-  notify('Objetivo cumplido: '+(s?.name||''),'Ya llevas el tiempo previsto para hoy. Para el temporizador para registrarlo.',{tag:'plan-timer',renotify:true,silent:false,requireInteraction:true});
+  if(document.visibilityState==='visible')toast('¡Tiempo cumplido: '+tLabel(T)+'!');
+  notify('Tiempo cumplido: '+tLabel(T),'Ya llevas el tiempo previsto para hoy. Para el temporizador para registrarlo.',{tag:'plan-timer',renotify:true,silent:false,requireInteraction:true});
 }
 async function askNotify(){
   if(!('Notification' in window)||Notification.permission!=='default')return;
   try{await Notification.requestPermission()}catch(e){}
 }
-function timerStart(sid){
+/* Un temporizador por concepto (unit = id del tema o '__rev'). Solo uno en marcha a la vez:
+   si empiezas otro, el anterior se para y se registra en su concepto. */
+const sameT=(T,sid,unit)=>T&&T.sid===sid&&(T.unit||null)===(unit||null);
+function timerStart(sid,unit,goalH,uname){
   const T=state.timer;
-  if(T&&T.sid!==sid){const ms=tElapsed();const old=T.sid;state.timer=null;if(ms>=60e3)markDone(old,ms/3600e3)}
-  if(state.timer?.sid===sid){state.timer.start=Date.now()}
-  else state.timer={sid,start:Date.now(),acc:0,goalH:todayLeft(sid),notified:false};
+  if(T&&!sameT(T,sid,unit)){const ms=tElapsed();state.timer=null;if(ms>=60e3)markDone(T.sid,ms/3600e3,T.unit)}
+  if(sameT(state.timer,sid,unit)){state.timer.start=Date.now()}
+  else state.timer={sid,unit:unit||null,uname:uname||'',start:Date.now(),acc:0,goalH:goalH!=null&&!isNaN(goalH)?goalH:todayLeft(sid),notified:false};
   writeNow();askNotify().then(timerNotify);scheduleGoal();render();
 }
 function timerPause(){const T=state.timer;if(!T||!T.start)return;T.acc=tElapsed();T.start=null;clearTimeout(goalT);writeNow();timerNotify();render()}
 function timerStop(){
   const T=state.timer;if(!T)return;const ms=tElapsed();state.timer=null;clearTimeout(goalT);writeNow();clearNotify();
   if(ms<60e3){toast('Menos de 1 minuto: no se registra');render();return}
-  markDone(T.sid,ms/3600e3);
+  markDone(T.sid,ms/3600e3,T.unit);
 }
 function timerDiscard(){if(!state.timer)return;if(!confirm('¿Descartar el tiempo del temporizador sin registrarlo?'))return;state.timer=null;clearTimeout(goalT);writeNow();clearNotify();toast('Temporizador descartado');render()}
-function timerBlock(s,left){
-  const T=state.timer, mine=T&&T.sid===s.id;
-  if(!mine)return `<div class="row"><button class="mark" data-tstart="${s.id}" style="flex:1">▶ Empezar a estudiar</button></div>`;
+function timerBlock(s,unit,goalH,uname){
+  const T=state.timer, mine=sameT(T,s.id,unit);
+  const attrs=`data-tstart="${s.id}" data-tunit="${esc(unit||'')}" data-tgoalh="${goalH}" data-tuname="${esc(uname||'')}"`;
+  if(!mine)return `<div class="row"><button class="mark" ${attrs} style="flex:1">▶ Empezar · ${fmtH(goalH)}</button></div>`;
   const el=tElapsed(), goal=T.goalH*3600e3, rem=goal-el;
   return `<div class="timer ${T.start?'on':''}">
     <div class="row" style="justify-content:space-between;align-items:flex-end"><div class="stack" style="gap:4px"><span class="state">${T.start?'<span class="pulse"></span>Estudiando':'En pausa'}</span><span class="clock" data-tclock>${fmtClock(el)}</span></div>
     <button class="ghost" data-tdiscard aria-label="Descartar temporizador" title="Descartar">✕</button></div>
     ${goal>0?`<div class="bar" aria-hidden="true"><span data-tbar style="width:${Math.min(100,el/goal*100)}%;background:var(--c)"></span></div>`:''}
     <span class="goal ${goal>0&&rem<=0?'reached':''}" data-tgoal>${goal>0?(rem>0?'Quedan '+fmtClock(rem)+' para el objetivo de hoy':'Objetivo de hoy cumplido · '+fmtClock(-rem)+' extra'):'Tiempo extra para hoy'}</span>
-    <div class="row">${T.start?`<button data-tpause style="flex:1">❚❚ Pausar</button>`:`<button class="mark" data-tstart="${s.id}" style="flex:1">▶ Reanudar</button>`}<button class="primary" data-tstop style="flex:1;white-space:nowrap">■ Parar</button></div>
+    <div class="row">${T.start?`<button data-tpause style="flex:1">❚❚ Pausar</button>`:`<button class="mark" ${attrs} style="flex:1">▶ Reanudar</button>`}<button class="primary" data-tstop style="flex:1;white-space:nowrap">■ Parar</button></div>
   </div>`;
 }
 function timerBar(){
@@ -309,7 +316,7 @@ function timerBar(){
   document.body.classList.toggle('has-timerbar',show);
   if(!show){b.hidden=true;return}
   b.hidden=false;b.style.setProperty('--c',s.color);
-  b.innerHTML=`<span class="nm">${T.start?'<span class="pulse"></span>':'❚❚ '}${esc(s.name)}</span><span class="num" data-tclock>${fmtClock(tElapsed())}</span>${T.start?'<button data-tpause>Pausar</button>':`<button data-tstart="${s.id}">Reanudar</button>`}<button data-tstop>Parar</button>`;
+  b.innerHTML=`<span class="nm">${T.start?'<span class="pulse"></span>':'❚❚ '}${esc(tLabel(T))}</span><span class="num" data-tclock>${fmtClock(tElapsed())}</span>${T.start?'<button data-tpause>Pausar</button>':`<button data-tstart="${s.id}" data-tunit="${esc(T.unit||'')}" data-tgoalh="${T.goalH}" data-tuname="${esc(T.uname||'')}">Reanudar</button>`}<button data-tstop>Parar</button>`;
 }
 function tick(){
   const T=state.timer;
@@ -327,7 +334,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.5.0';
+const APP_VERSION='1.6.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -485,8 +492,8 @@ function vHoy(){
         <div class="row" style="justify-content:space-between"><h3>${esc(s.name)}</h3><span class="num" style="font-size:1.1rem">${fmtH(it.h)}</span></div>
         ${dH>0&&!isDone?`<div class="bar" aria-hidden="true"><span style="width:${dH/it.h*100}%;background:var(--c)"></span></div><span class="muted" style="font-size:.9rem">Llevas <span class="num">${fmtH(dH)}</span> · quedan <span class="num">${fmtH(left)}</span></span>`:''}
         ${isDone&&dH>it.h+0.01?`<span class="muted" style="font-size:.9rem">Has hecho <span class="num">${fmtH(dH)}</span>, más de lo previsto</span>`:''}
-        ${!isDone||state.timer?.sid===s.id?timerBlock(s,left):''}
-        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus?`<span class="topics">${esc(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where">Apuntes: ${esc(x.t.where)}</span>`:''}</li>`).join('')}</ul>`:''}
+        ${(()=>{const T=state.timer;if(!T||T.sid!==s.id)return'';if(T.unit&&tps.some(x=>x.u.id===T.unit))return'';return `${T.uname?`<strong>${esc(T.uname)}</strong>`:''}`+timerBlock(s,T.unit,T.goalH,T.uname)})()}
+        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus?`<span class="topics">${esc(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where">Apuntes: ${esc(x.t.where)}</span>`:''}${timerBlock(s,x.u.id,Math.round(x.h*60)/60,x.u.name)}</li>`).join('')}</ul>`:''}
         <div class="row" style="justify-content:space-between"><span class="muted" style="font-size:.85rem">${s.exam===t?'Repaso antes del examen de las '+esc(s.time):'Examen '+until(s.exam)}</span>
         ${isDone&&logOpen!==s.id?`<button class="ghost" data-undo="${s.id}">✓ Hecho · Deshacer</button>`:''}</div>
         ${logOpen===s.id?`<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="eyebrow">¿Cuánto has estudiado?</span>
@@ -658,7 +665,7 @@ document.addEventListener('click',e=>{
   if(ds.edit)return openEditor(ds.edit);
   if(ds.done)return markDone(ds.done,+ds.h);
   if(ds.undo)return undoDone(ds.undo);
-  if(ds.tstart)return timerStart(ds.tstart);
+  if(ds.tstart)return timerStart(ds.tstart,ds.tunit||null,ds.tgoalh!=null&&ds.tgoalh!==''?+ds.tgoalh:null,ds.tuname||'');
   if('tpause' in ds)return timerPause();
   if('tstop' in ds)return timerStop();
   if('tdiscard' in ds)return timerDiscard();
