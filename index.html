@@ -355,7 +355,7 @@ let splitDate=null, splitDraft=null, splitTotal=0, splitMin={}, splitMax={};
 function splitCandidates(d){return state.subjects.filter(s=>s.exam&&s.topics.length&&(s.exam>d||(s.exam===d&&examWindow(s,d)>=0.25))&&(remaining(s)+(d===today()?(state.log[today()]?.[s.id]?.h||0):0))>0.01)}
 function openSplit(d){
   const day=buildPlan().days.find(x=>x.date===d);if(!day||!day.cap){toast('Ese día no tienes horas de estudio');return}
-  splitDate=d;splitDraft={};splitMin={};splitMax={};
+  splitDate=d;splitDraft={};splitMin={};splitMax={};splitPending=null;splitEdit=null;
   const tl=d===today()?(state.log[d]||{}):{};
   for(const s of splitCandidates(d)){
     splitDraft[s.id]=day.items.find(i=>i.sid===s.id)?.h||0;
@@ -367,20 +367,35 @@ function openSplit(d){
   renderSplit();
 }
 function closeSplit(){splitDate=null;$('#split').hidden=true;document.body.style.overflow='';render()}
+/* Cambiar el tiempo de una asignatura: primero se elige cuánto (±15' o minutos escritos a mano)
+   y luego de qué asignatura se quita (o a cuál se da), para no tocar las que no quieres. */
+let splitPending=null, splitEdit=null;
+const qm=x=>Math.round(x*60)/60;
+function splitPartners(sid,dv){
+  return Object.keys(splitDraft).filter(i=>i!==sid).map(i=>{
+    const room=dv>0?splitDraft[i]-splitMin[i]:splitMax[i]-splitDraft[i];
+    return {i,ok:room>=Math.abs(dv)-1e-6,room:Math.max(0,room)};
+  });
+}
 function splitStep(sid,dv){
-  const ids=Object.keys(splitDraft), q=x=>Math.round(x*4)/4;
-  if(dv>0){
-    if(splitDraft[sid]+dv>splitMax[sid]+0.124){toast('No le queda más temario pendiente');return}
-    const donor=ids.filter(i=>i!==sid&&splitDraft[i]-dv>=splitMin[i]-1e-6).sort((a,b)=>splitDraft[b]-splitDraft[a])[0];
-    if(!donor){toast('No hay tiempo de otra asignatura que mover');return}
-    splitDraft[donor]=q(splitDraft[donor]-dv);splitDraft[sid]=q(splitDraft[sid]+dv);
-  }else{
-    if(splitDraft[sid]+dv<splitMin[sid]-1e-6){toast('Hoy ya llevas '+fmtH(splitMin[sid])+' de esta asignatura');return}
-    const taker=ids.filter(i=>i!==sid&&splitDraft[i]-dv<=splitMax[i]+0.124).sort((a,b)=>splitDraft[b]-splitDraft[a])[0];
-    if(!taker){toast('Ninguna otra asignatura puede recibir ese tiempo');return}
-    splitDraft[taker]=q(splitDraft[taker]-dv);splitDraft[sid]=q(splitDraft[sid]+dv);
-  }
-  renderSplit();
+  dv=qm(dv);if(!dv)return;
+  if(dv>0&&splitDraft[sid]+dv>splitMax[sid]+1/120){toast('A '+findS(sid).name+' solo le quedan '+fmtH(splitMax[sid])+' de temario');return}
+  if(dv<0&&splitDraft[sid]+dv<splitMin[sid]-1e-6){toast(splitMin[sid]>0?'Hoy ya llevas '+fmtH(splitMin[sid])+' de esta asignatura':'No puedes quitar más de '+fmtH(splitDraft[sid]));return}
+  const ok=splitPartners(sid,dv).filter(x=>x.ok);
+  if(!ok.length){toast(dv>0?'Ninguna otra asignatura tiene '+fmtH(dv)+' para darte':'Ninguna otra asignatura puede recibir '+fmtH(-dv));return}
+  splitEdit=null;
+  if(Object.keys(splitDraft).length===2){splitApply(sid,dv,ok[0].i);return}
+  splitPending={sid,dv};renderSplit();setTimeout(()=>$('#spicker')?.scrollIntoView({block:'center',behavior:'smooth'}),30);
+}
+function splitApply(sid,dv,other){
+  splitDraft[other]=qm(splitDraft[other]-dv);splitDraft[sid]=qm(splitDraft[sid]+dv);
+  const o=findS(other).name;splitPending=null;
+  toast(dv>0?`+${fmtH(dv)} · quitado de ${o}`:`−${fmtH(-dv)} · dado a ${o}`);renderSplit();
+}
+function splitCustom(sign){
+  const v=Math.round(+($('#smin')?.value||0));
+  if(!(v>0)){toast('Escribe los minutos');$('#smin')?.focus();return}
+  splitStep(splitEdit,sign*v/60);
 }
 function saveSplit(){(state.overrides??={})[splitDate]={...splitDraft};save();toast('Reparto guardado');closeSplit()}
 function resetSplit(){if(state.overrides)delete state.overrides[splitDate];save();toast('Reparto automático');closeSplit()}
@@ -389,12 +404,16 @@ function renderSplit(){
   const custom=!!state.overrides?.[splitDate];
   el.innerHTML=`<main><div class="sheethead"><button class="ghost" data-splitclose>← Volver</button><span class="savestate">${custom?'Reparto a mano':'Reparto automático'}</span></div>
   <header class="stack" style="gap:6px"><span class="eyebrow">${esc(fmtDate(splitDate,{weekday:'long',day:'numeric',month:'long'}))}</span><h1>Reparto <span class="hl">del día</span></h1>
-  <span class="muted">Mueve tiempo entre asignaturas en pasos de 15 min. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
+  <span class="muted">Usa ±15' o toca el tiempo (✎) para escribir los minutos; después eliges de qué asignatura sale ese tiempo. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
   <div class="bar" style="height:14px" aria-hidden="true">${ids.map(i=>`<span style="width:${splitDraft[i]/tot*100}%;background:${findS(i).color}"></span>`).join('')}</div>
   <section class="card" style="padding-block:4px">${ids.map(i=>{const s=findS(i);return`<div class="splitrow">
     <div style="min-width:0"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="dot" style="background:${s.color}"></span><strong style="min-width:0">${esc(s.name)}</strong></div><span class="muted" style="font-size:.85rem">Examen ${until(s.exam)}</span></div>
     <span class="pct">${Math.round(splitDraft[i]/tot*100)}%</span>
-    <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sstep="${i}" data-v="-0.25" aria-label="15 minutos menos de ${esc(s.name)}">−15'</button><span class="num">${fmtH(splitDraft[i])}</span><button data-sstep="${i}" data-v="0.25" aria-label="15 minutos más de ${esc(s.name)}">+15'</button></div>
+    <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sstep="${i}" data-v="-0.25" aria-label="15 minutos menos de ${esc(s.name)}">−15'</button><button class="ghost num" data-sedit="${i}" aria-label="Escribir minutos para ${esc(s.name)}" style="min-width:110px;font-size:1.05rem;text-decoration:underline dotted;text-underline-offset:4px">${fmtH(splitDraft[i])} ✎</button><button data-sstep="${i}" data-v="0.25" aria-label="15 minutos más de ${esc(s.name)}">+15'</button></div>
+    ${splitEdit===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="smin">¿Cuántos minutos?</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="smin" type="number" inputmode="numeric" min="1" step="1" placeholder="Ej. 20" style="flex:1;min-width:0"><button data-scustom="-1">− Quitar</button><button class="primary" data-scustom="1">+ Añadir</button></div><button class="ghost" data-seditcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
+    ${splitPending?.sid===i?`<div id="spicker" class="stack" style="grid-column:1/-1;gap:8px;border:2px solid var(--mark);border-radius:10px;padding:10px"><strong>${splitPending.dv>0?`¿De qué asignatura quito ${fmtH(splitPending.dv)}?`:`¿A qué asignatura le doy ${fmtH(-splitPending.dv)}?`}</strong>
+      ${splitPartners(i,splitPending.dv).map(x=>{const o=findS(x.i);return`<button data-spick="${x.i}" ${x.ok?'':'disabled'} style="justify-content:space-between"><span class="row" style="gap:8px;flex-wrap:nowrap;min-width:0"><span class="dot" style="background:${o.color}"></span><span style="min-width:0;text-align:left">${esc(o.name)}</span></span><span class="num muted" style="font-weight:400">${splitPending.dv>0?'tiene '+fmtH(splitDraft[x.i]):'puede +'+fmtH(x.room)}</span></button>`}).join('')}
+      <button class="ghost" data-spickcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
   </div>`}).join('')}</section>
   <div class="row"><button class="primary" data-splitsave style="flex:1">Guardar reparto</button>${custom?'<button data-splitreset>Volver al automático</button>':''}</div>
   </main>`;
@@ -410,7 +429,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.8.0';
+const APP_VERSION='1.9.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -749,6 +768,11 @@ document.addEventListener('click',e=>{
   if(ds.split)return openSplit(ds.split);
   if('splitclose' in ds)return closeSplit();
   if(ds.sstep)return splitStep(ds.sstep,+ds.v);
+  if(ds.sedit){splitPending=null;splitEdit=splitEdit===ds.sedit?null:ds.sedit;renderSplit();setTimeout(()=>$('#smin')?.focus(),30);return}
+  if('seditcancel' in ds){splitEdit=null;return renderSplit()}
+  if(ds.scustom)return splitCustom(+ds.scustom);
+  if(ds.spick&&splitPending)return splitApply(splitPending.sid,splitPending.dv,ds.spick);
+  if('spickcancel' in ds){splitPending=null;return renderSplit()}
   if('splitsave' in ds)return saveSplit();
   if('splitreset' in ds)return resetSplit();
   if(ds.tstart)return timerStart(ds.tstart,ds.tunit||null,ds.tgoalh!=null&&ds.tgoalh!==''?+ds.tgoalh:null,ds.tuname||'');
