@@ -355,7 +355,7 @@ let splitDate=null, splitDraft=null, splitTotal=0, splitMin={}, splitMax={};
 function splitCandidates(d){return state.subjects.filter(s=>s.exam&&s.topics.length&&(s.exam>d||(s.exam===d&&examWindow(s,d)>=0.25))&&(remaining(s)+(d===today()?(state.log[today()]?.[s.id]?.h||0):0))>0.01)}
 function openSplit(d){
   const day=buildPlan().days.find(x=>x.date===d);if(!day||!day.cap){toast('Ese día no tienes horas de estudio');return}
-  splitDate=d;splitDraft={};splitMin={};splitMax={};splitPending=null;splitEdit=null;
+  splitDate=d;splitDraft={};splitMin={};splitMax={};splitPending=null;splitEdit=null;splitPctEdit=null;
   const tl=d===today()?(state.log[d]||{}):{};
   for(const s of splitCandidates(d)){
     splitDraft[s.id]=day.items.find(i=>i.sid===s.id)?.h||0;
@@ -381,11 +381,33 @@ function splitStep(sid,dv){
   dv=qm(dv);if(!dv)return;
   if(dv>0&&splitDraft[sid]+dv>splitMax[sid]+1/120){toast('A '+findS(sid).name+' solo le quedan '+fmtH(splitMax[sid])+' de temario');return}
   if(dv<0&&splitDraft[sid]+dv<splitMin[sid]-1e-6){toast(splitMin[sid]>0?'Hoy ya llevas '+fmtH(splitMin[sid])+' de esta asignatura':'No puedes quitar más de '+fmtH(splitDraft[sid]));return}
-  const ok=splitPartners(sid,dv).filter(x=>x.ok);
-  if(!ok.length){toast(dv>0?'Ninguna otra asignatura tiene '+fmtH(dv)+' para darte':'Ninguna otra asignatura puede recibir '+fmtH(-dv));return}
-  splitEdit=null;
-  if(Object.keys(splitDraft).length===2){splitApply(sid,dv,ok[0].i);return}
+  const parts=splitPartners(sid,dv), ok=parts.filter(x=>x.ok), room=parts.reduce((a,x)=>a+x.room,0);
+  if(room<Math.abs(dv)-1/120){toast(dv>0?'Las demás asignaturas solo tienen '+fmtH(room)+' para dar':'Las demás asignaturas solo pueden recibir '+fmtH(room));return}
+  splitEdit=null;splitPctEdit=null;
+  if(Object.keys(splitDraft).length===2){splitApply(sid,dv,parts[0].i);return}
   splitPending={sid,dv};renderSplit();setTimeout(()=>$('#spicker')?.scrollIntoView({block:'center',behavior:'smooth'}),30);
+}
+/* Reparte el cambio entre todas las demás según el margen de cada una (al 100 % las deja a 0). */
+function splitApplyAll(sid,dv){
+  const parts=splitPartners(sid,dv).filter(x=>x.room>0), room=parts.reduce((a,x)=>a+x.room,0);
+  let left=Math.abs(dv);
+  parts.forEach((x,k)=>{let take=k===parts.length-1?left:qm(Math.abs(dv)*x.room/room);take=Math.min(take,x.room,left);splitDraft[x.i]=qm(splitDraft[x.i]-Math.sign(dv)*take);left=qm(left-take)});
+  splitDraft[sid]=qm(splitDraft[sid]+dv);splitPending=null;
+  const tot=Object.values(splitDraft).reduce((a,b)=>a+b,0);
+  toast(splitDraft[sid]>=tot-1/120?'Hoy solo '+findS(sid).name:dv>0?`+${fmtH(dv)} · repartido entre las demás`:`−${fmtH(-dv)} · repartido entre las demás`);renderSplit();
+}
+/* Escribir el porcentaje directamente. */
+let splitPctEdit=null;
+function splitPct(){
+  const sid=splitPctEdit;let v=+($('#spct')?.value);
+  if(!(v>=0&&v<=100)){toast('Escribe un porcentaje entre 0 y 100');$('#spct')?.focus();return}
+  const tot=Object.values(splitDraft).reduce((a,b)=>a+b,0);
+  let target=qm(tot*v/100);
+  if(target>splitMax[sid]+1/120){toast(`${findS(sid).name} solo tiene ${fmtH(splitMax[sid])} pendientes: como mucho ${Math.floor(splitMax[sid]/tot*100)} %`);return}
+  if(target<splitMin[sid]-1e-6){toast(`Hoy ya llevas ${fmtH(splitMin[sid])}: como mínimo ${Math.ceil(splitMin[sid]/tot*100)} %`);return}
+  const dv=qm(target-splitDraft[sid]);
+  if(Math.abs(dv)<1/120){splitPctEdit=null;renderSplit();return}
+  splitStep(sid,dv);
 }
 function splitApply(sid,dv,other){
   splitDraft[other]=qm(splitDraft[other]-dv);splitDraft[sid]=qm(splitDraft[sid]+dv);
@@ -404,15 +426,18 @@ function renderSplit(){
   const custom=!!state.overrides?.[splitDate];
   el.innerHTML=`<main><div class="sheethead"><button class="ghost" data-splitclose>← Volver</button><span class="savestate">${custom?'Reparto a mano':'Reparto automático'}</span></div>
   <header class="stack" style="gap:6px"><span class="eyebrow">${esc(fmtDate(splitDate,{weekday:'long',day:'numeric',month:'long'}))}</span><h1>Reparto <span class="hl">del día</span></h1>
-  <span class="muted">Pulsa + o − y escribe cuántos minutos quieres de más o de menos; después eliges de qué asignatura sale (o a cuál va) ese tiempo. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
+  <span class="muted">Pulsa + o − y escribe los minutos, o toca el porcentaje para escribirlo (hasta 100 %); después eliges de qué asignatura sale (o a cuál va) ese tiempo. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
   <div class="bar" style="height:14px" aria-hidden="true">${ids.map(i=>`<span style="width:${splitDraft[i]/tot*100}%;background:${findS(i).color}"></span>`).join('')}</div>
   <section class="card" style="padding-block:4px">${ids.map(i=>{const s=findS(i);return`<div class="splitrow">
     <div style="min-width:0"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="dot" style="background:${s.color}"></span><strong style="min-width:0">${esc(s.name)}</strong></div><span class="muted" style="font-size:.85rem">Examen ${until(s.exam)}</span></div>
-    <span class="pct">${Math.round(splitDraft[i]/tot*100)}%</span>
+    <button class="ghost pct" data-spct="${i}" aria-label="Cambiar el porcentaje de ${esc(s.name)}" style="min-height:0;padding:4px 6px;text-decoration:underline dotted;text-underline-offset:5px;text-decoration-thickness:2px">${Math.round(splitDraft[i]/tot*100)}%</button>
     <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sopen="${i}" data-sign="-1" aria-label="Menos tiempo para ${esc(s.name)}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign<0}" style="font-size:1.3rem">−</button><span class="num">${fmtH(splitDraft[i])}</span><button data-sopen="${i}" data-sign="1" aria-label="Más tiempo para ${esc(s.name)}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign>0}" style="font-size:1.3rem">+</button></div>
+    ${splitPctEdit===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="spct">Porcentaje de hoy para ${esc(s.name)}</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="spct" type="number" inputmode="numeric" min="0" max="100" step="1" value="${Math.round(splitDraft[i]/tot*100)}" style="flex:1;min-width:0"><span class="num">%</span><button class="primary" data-spctok>Siguiente</button></div><span class="muted" style="font-size:.85rem">Pon 100 % para dedicar el día entero a esta asignatura.</span><button class="ghost" data-spctcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
     ${splitEdit?.sid===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="smin">${splitEdit.sign>0?'¿Cuántos minutos MÁS?':'¿Cuántos minutos MENOS?'}</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="smin" type="number" inputmode="numeric" min="1" step="1" placeholder="Ej. 20" style="flex:1;min-width:0"><button class="primary" data-scustom="${splitEdit.sign}">Siguiente</button></div><button class="ghost" data-seditcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
-    ${splitPending?.sid===i?`<div id="spicker" class="stack" style="grid-column:1/-1;gap:8px;border:2px solid var(--mark);border-radius:10px;padding:10px"><strong>${splitPending.dv>0?`¿De qué asignatura quito ${fmtH(splitPending.dv)}?`:`¿A qué asignatura le doy ${fmtH(-splitPending.dv)}?`}</strong>
-      ${splitPartners(i,splitPending.dv).map(x=>{const o=findS(x.i);return`<button data-spick="${x.i}" ${x.ok?'':'disabled'} style="justify-content:space-between"><span class="row" style="gap:8px;flex-wrap:nowrap;min-width:0"><span class="dot" style="background:${o.color}"></span><span style="min-width:0;text-align:left">${esc(o.name)}</span></span><span class="num muted" style="font-weight:400">${splitPending.dv>0?'tiene '+fmtH(splitDraft[x.i]):'puede +'+fmtH(x.room)}</span></button>`}).join('')}
+    ${splitPending?.sid===i?`<div id="spicker" class="stack" style="grid-column:1/-1;gap:8px;border:2px solid var(--mark);border-radius:10px;padding:10px"><strong>${(()=>{const T=Object.values(splitDraft).reduce((a,b)=>a+b,0),pc=Math.round(Math.abs(splitPending.dv)/T*100);return splitPending.dv>0?`¿De qué asignatura quito ${fmtH(splitPending.dv)} (${pc} %)?`:`¿A qué asignatura le doy ${fmtH(-splitPending.dv)} (${pc} %)?`})()}</strong>
+      ${(()=>{const T=Object.values(splitDraft).reduce((a,b)=>a+b,0),all=splitPending.dv>0&&splitDraft[i]+splitPending.dv>=T-1/120;return `<button class="${all?'mark':''}" data-spick="__all" style="justify-content:flex-start">${all?'Quitar las demás asignaturas de este día':'Repartirlo entre todas las demás'}</button>`})()}
+      ${splitPending.dv>0&&splitDraft[i]+splitPending.dv>=Object.values(splitDraft).reduce((a,b)=>a+b,0)-1/120?'':`<span class="muted" style="font-size:.85rem">O elige una:</span>`}
+      ${splitPending.dv>0&&splitDraft[i]+splitPending.dv>=Object.values(splitDraft).reduce((a,b)=>a+b,0)-1/120?'':splitPartners(i,splitPending.dv).map(x=>{const o=findS(x.i);return`<button data-spick="${x.i}" ${x.ok?'':'disabled'} style="justify-content:space-between"><span class="row" style="gap:8px;flex-wrap:nowrap;min-width:0"><span class="dot" style="background:${o.color}"></span><span style="min-width:0;text-align:left">${esc(o.name)}</span></span><span class="num muted" style="font-weight:400">${splitPending.dv>0?'tiene '+fmtH(splitDraft[x.i]):'puede +'+fmtH(x.room)}</span></button>`}).join('')}
       <button class="ghost" data-spickcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
   </div>`}).join('')}</section>
   <div class="row"><button class="primary" data-splitsave style="flex:1">Guardar reparto</button>${custom?'<button data-splitreset>Volver al automático</button>':''}</div>
@@ -429,7 +454,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.10.0';
+const APP_VERSION='1.11.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -768,10 +793,13 @@ document.addEventListener('click',e=>{
   if(ds.split)return openSplit(ds.split);
   if('splitclose' in ds)return closeSplit();
   if(ds.sstep)return splitStep(ds.sstep,+ds.v);
-  if(ds.sopen){const sg=+ds.sign;splitPending=null;splitEdit=(splitEdit?.sid===ds.sopen&&splitEdit.sign===sg)?null:{sid:ds.sopen,sign:sg};renderSplit();setTimeout(()=>{const i=$('#smin');if(i){i.focus();i.scrollIntoView({block:'center',behavior:'smooth'})}},30);return}
+  if(ds.sopen){const sg=+ds.sign;splitPending=null;splitPctEdit=null;splitEdit=(splitEdit?.sid===ds.sopen&&splitEdit.sign===sg)?null:{sid:ds.sopen,sign:sg};renderSplit();setTimeout(()=>{const i=$('#smin');if(i){i.focus();i.scrollIntoView({block:'center',behavior:'smooth'})}},30);return}
   if('seditcancel' in ds){splitEdit=null;return renderSplit()}
   if(ds.scustom)return splitCustom(+ds.scustom);
-  if(ds.spick&&splitPending)return splitApply(splitPending.sid,splitPending.dv,ds.spick);
+  if(ds.spick&&splitPending)return ds.spick==='__all'?splitApplyAll(splitPending.sid,splitPending.dv):splitApply(splitPending.sid,splitPending.dv,ds.spick);
+  if(ds.spct){splitPending=null;splitEdit=null;splitPctEdit=splitPctEdit===ds.spct?null:ds.spct;renderSplit();setTimeout(()=>{const i=$('#spct');if(i){i.focus();i.select();i.scrollIntoView({block:'center',behavior:'smooth'})}},30);return}
+  if('spctok' in ds)return splitPct();
+  if('spctcancel' in ds){splitPctEdit=null;return renderSplit()}
   if('spickcancel' in ds){splitPending=null;return renderSplit()}
   if('splitsave' in ds)return saveSplit();
   if('splitreset' in ds)return resetSplit();
@@ -805,7 +833,7 @@ document.addEventListener('click',e=>{
   if('delok' in ds){state.subjects=state.subjects.filter(x=>x.id!==s.id);save();toast('Asignatura eliminada');return closeEditor()}
   if('delno' in ds)return renderSheet();
 });
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='smin'&&splitEdit){e.preventDefault();splitCustom(splitEdit.sign)}});
+document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='smin'&&splitEdit){e.preventDefault();splitCustom(splitEdit.sign)}else if(e.target.id==='spct'&&splitPctEdit){e.preventDefault();splitPct()}});
 document.addEventListener('change',e=>{
   const el=e.target;
   if('start' in el.dataset){state.settings.start=el.value||'09:00';save();render();return}
