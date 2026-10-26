@@ -311,9 +311,22 @@ function timerStart(sid,unit,goalH,uname){
 }
 function timerPause(){const T=state.timer;if(!T||!T.start)return;T.acc=tElapsed();T.start=null;clearTimeout(goalT);writeNow();timerNotify();render()}
 function timerStop(){
-  const T=state.timer;if(!T)return;const ms=tElapsed();state.timer=null;clearTimeout(goalT);writeNow();clearNotify();
+  const T=state.timer;if(!T)return;tAdj=null;const ms=tElapsed();state.timer=null;clearTimeout(goalT);writeNow();clearNotify();
   if(ms<60e3){toast('Menos de 1 minuto: no se registra');render();return}
   markDone(T.sid,ms/3600e3,T.unit);
+}
+/* Corregir el tiempo del temporizador (p. ej. si olvidaste reanudarlo). Parte del tiempo que
+   lleva el temporizador, no de lo que falta, y el cambio se suma al propio temporizador. */
+let tAdj=null;
+function timerAdjOpen(){if(!state.timer)return;tAdj=Math.round(tElapsed()/60e3);render();setTimeout(()=>document.querySelector('[data-tadjbox]')?.scrollIntoView({block:'center',behavior:'smooth'}),30)}
+function timerAdjStep(m){tAdj=Math.max(0,Math.min(16*60,tAdj+m));render()}
+function timerAdjSave(){
+  const T=state.timer;if(!T||tAdj==null)return;
+  const ms=tAdj*60e3, before=tElapsed();
+  T.acc=ms;if(T.start)T.start=Date.now();
+  T.notified=T.goalH>0&&ms>=T.goalH*3600e3?T.notified:false;
+  tAdj=null;writeNow();scheduleGoal();timerNotify();
+  const d=Math.round((ms-before)/60e3);toast(d?`Temporizador ${d>0?'+':'−'}${fmtH(Math.abs(d)/60)} · ahora ${fmtClock(ms)}`:'Sin cambios');render();
 }
 function timerDiscard(){if(!state.timer)return;if(!confirm('¿Descartar el tiempo del temporizador sin registrarlo?'))return;state.timer=null;clearTimeout(goalT);writeNow();clearNotify();toast('Temporizador descartado');render()}
 function timerBlock(s,unit,goalH,uname){
@@ -322,10 +335,16 @@ function timerBlock(s,unit,goalH,uname){
   if(!mine)return `<div class="row"><button class="mark" ${attrs} style="flex:1">▶ Empezar · ${fmtH(goalH)}</button></div>`;
   const el=tElapsed(), goal=T.goalH*3600e3, rem=goal-el;
   return `<div class="timer ${T.start?'on':''}">
-    <div class="row" style="justify-content:space-between;align-items:flex-end"><div class="stack" style="gap:4px"><span class="state">${T.start?'<span class="pulse"></span>Estudiando':'En pausa'}</span><span class="clock" data-tclock>${fmtClock(el)}</span></div>
+    <div class="row" style="justify-content:space-between;align-items:flex-end"><div class="stack" style="gap:4px"><span class="state">${T.start?'<span class="pulse"></span>Estudiando':'En pausa'}</span><button class="ghost clock" data-tadj aria-label="Corregir el tiempo del temporizador" style="min-height:0;padding:0;justify-content:flex-start;text-decoration:underline dotted;text-underline-offset:6px;text-decoration-thickness:2px" data-tclock>${fmtClock(el)}</button></div>
     <button class="ghost" data-tdiscard aria-label="Descartar temporizador" title="Descartar">✕</button></div>
     ${goal>0?`<div class="bar" aria-hidden="true"><span data-tbar style="width:${Math.min(100,el/goal*100)}%;background:var(--c)"></span></div>`:''}
     <span class="goal ${goal>0&&rem<=0?'reached':''}" data-tgoal>${goal>0?(rem>0?'Quedan '+fmtClock(rem)+' para el objetivo de hoy':'Objetivo de hoy cumplido · '+fmtClock(-rem)+' extra'):'Tiempo extra para hoy'}</span>
+    ${tAdj!=null?`<div class="stack" data-tadjbox style="gap:8px;border:2px solid var(--mark);border-radius:10px;padding:10px"><span class="eyebrow">Corregir el tiempo del temporizador</span>
+      <span class="clock" style="text-align:center">${fmtClock(tAdj*60e3)}</span>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px"><button data-tadjstep="-15">−15'</button><button data-tadjstep="-5">−5'</button><button data-tadjstep="5">+5'</button><button data-tadjstep="15">+15'</button></div>
+      <div class="row" style="flex-wrap:nowrap;gap:8px"><label for="tadjmin" class="muted" style="font-size:.85rem;white-space:nowrap">o escribe los minutos</label><input id="tadjmin" type="number" inputmode="numeric" min="0" step="1" value="${tAdj}" style="flex:1;min-width:0"></div>
+      <div class="row"><button class="primary" data-tadjsave style="flex:1">Guardar</button><button class="ghost" data-tadjcancel>Cancelar</button></div></div>`
+    :`<button class="ghost" data-tadj style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem;text-decoration:underline">¿Se te olvidó encenderlo? Corregir tiempo</button>`}
     <div class="row">${T.start?`<button data-tpause style="flex:1">❚❚ Pausar</button>`:`<button class="mark" ${attrs} style="flex:1">▶ Reanudar</button>`}<button class="primary" data-tstop style="flex:1;white-space:nowrap">■ Parar</button></div>
   </div>`;
 }
@@ -454,7 +473,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.11.0';
+const APP_VERSION='1.12.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -623,7 +642,7 @@ function vHoy(){
         ${logOpen===s.id?`<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="eyebrow">¿Cuánto has estudiado?</span>
           <div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px"><button data-lstep="-0.25" aria-label="15 minutos menos" style="flex:none;white-space:nowrap;padding-inline:12px">−15'</button><span class="num" style="font-size:1.25rem;white-space:nowrap;text-align:center;flex:1">${fmtH(logVal)}</span><button data-lstep="0.25" aria-label="15 minutos más" style="flex:none;white-space:nowrap;padding-inline:12px">+15'</button></div>
           <div class="row"><button class="primary" data-lsave="${s.id}" style="flex:1">Guardar</button><button class="ghost" data-lcancel>Cancelar</button></div></div>`
-        :!isDone?`<div class="row">${dH>0?`<button class="ghost" data-undo="${s.id}">Deshacer</button>`:''}<button data-logopen="${s.id}" data-h="${left}" style="flex:1">Registrar tiempo</button><button class="primary" data-done="${s.id}" data-h="${left}" style="flex:1">${dH>0?'Completar':'Hecho'}</button></div>`:''}
+        :!isDone?`<div class="row">${dH>0?`<button class="ghost" data-undo="${s.id}">Deshacer</button>`:''}${state.timer?.sid===s.id?`<button data-tadj style="flex:1">Corregir temporizador</button>`:`<button data-logopen="${s.id}" data-h="${left}" style="flex:1">Registrar tiempo</button>`}<button class="primary" data-done="${s.id}" data-h="${left}" style="flex:1">${dH>0?'Completar':'Hecho'}</button></div>`:''}
       </article>`}
     h+=`</section>`}
   return h+saveNote();
@@ -807,6 +826,10 @@ document.addEventListener('click',e=>{
   if('tpause' in ds)return timerPause();
   if('tstop' in ds)return timerStop();
   if('tdiscard' in ds)return timerDiscard();
+  if('tadj' in ds)return tAdj!=null?(tAdj=null,render()):timerAdjOpen();
+  if(ds.tadjstep)return timerAdjStep(+ds.tadjstep);
+  if('tadjsave' in ds)return timerAdjSave();
+  if('tadjcancel' in ds){tAdj=null;return render()}
   if(ds.themeSet){state.settings.theme=ds.themeSet;applyTheme();save();return render()}
   if(ds.logopen){logOpen=ds.logopen;logVal=Math.max(0.25,Math.round(+ds.h*4)/4);return render()}
   if(ds.lstep){logVal=Math.max(0.25,Math.min(12,logVal+ +ds.lstep));return render()}
@@ -833,7 +856,8 @@ document.addEventListener('click',e=>{
   if('delok' in ds){state.subjects=state.subjects.filter(x=>x.id!==s.id);save();toast('Asignatura eliminada');return closeEditor()}
   if('delno' in ds)return renderSheet();
 });
-document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='smin'&&splitEdit){e.preventDefault();splitCustom(splitEdit.sign)}else if(e.target.id==='spct'&&splitPctEdit){e.preventDefault();splitPct()}});
+document.addEventListener('input',e=>{if(e.target.id==='tadjmin'&&tAdj!=null){const v=Math.round(+e.target.value);if(v>=0){tAdj=Math.min(16*60,v);const c=document.querySelector('[data-tadjbox] .clock');if(c)c.textContent=fmtClock(tAdj*60e3)}}});
+document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='tadjmin'&&tAdj!=null){e.preventDefault();timerAdjSave();return}if(e.target.id==='smin'&&splitEdit){e.preventDefault();splitCustom(splitEdit.sign)}else if(e.target.id==='spct'&&splitPctEdit){e.preventDefault();splitPct()}});
 document.addEventListener('change',e=>{
   const el=e.target;
   if('start' in el.dataset){state.settings.start=el.value||'09:00';save();render();return}
