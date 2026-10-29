@@ -163,7 +163,25 @@ const pd=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
 const addDays=(s,n)=>{const d=pd(s);d.setDate(d.getDate()+n);return ymd(d)};
 const dow=s=>(pd(s).getDay()+6)%7;
 const diffDays=(a,b)=>Math.round((pd(b)-pd(a))/864e5);
-const today=()=>ymd(new Date());
+/* "Ahora" se calcula con la zona horaria por su nombre (Europe/Madrid…) y sus reglas de horario
+   de verano/invierno, no con el desfase que tenga guardado el navegador: tras el cambio de hora,
+   Chrome en Android puede seguir usando el desfase antiguo hasta que se cierra del todo. */
+const TZ_OPTS={auto:'Automática (la del móvil)','Europe/Madrid':'Península y Baleares','Atlantic/Canary':'Canarias'};
+function detectedTZ(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){return ''}}
+function appTZ(){
+  let pick='auto';try{pick=state.settings?.tz||'auto'}catch(e){}
+  if(pick!=='auto')return pick;
+  const d=detectedTZ();
+  return d&&d.includes('/')&&!/^Etc\//.test(d)?d:'Europe/Madrid';
+}
+function nowParts(){
+  try{
+    const o={};new Intl.DateTimeFormat('en-CA',{timeZone:appTZ(),year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date()).forEach(x=>o[x.type]=x.value);
+    return {date:o.year+'-'+o.month+'-'+o.day,h:(+o.hour%24)+(+o.minute)/60,hm:String(+o.hour%24).padStart(2,'0')+':'+o.minute};
+  }catch(e){const n=new Date();return {date:ymd(n),h:n.getHours()+n.getMinutes()/60,hm:String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')}}
+}
+const today=()=>nowParts().date;
+const clockAt=ms=>{try{return new Date(ms).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit',timeZone:appTZ()})}catch(e){return new Date(ms).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}};
 const fmtDate=(s,o={weekday:'short',day:'numeric',month:'short'})=>pd(s).toLocaleDateString('es-ES',o);
 function fmtH(h){const m=Math.round(h*60);const hh=Math.floor(m/60),mm=m%60;if(!hh)return mm+' min';return hh+' h'+(mm?' '+mm+' min':'')}
 const until=s=>{const n=diffDays(today(),s);return n===0?'hoy':n===1?'mañana':n<0?'pasado':'en '+n+' días'};
@@ -193,7 +211,7 @@ const hourOf=s=>{if(!s)return null;const[h,m]=s.split(':').map(Number);return is
 function examWindow(s,d){
   const T=hourOf(s.time);if(T==null||d!==s.exam)return 0;
   let st=hourOf(state.settings.start)??9;
-  if(d===today()){const n=new Date();st=Math.max(st,n.getHours()+n.getMinutes()/60)}
+  if(d===today()){st=Math.max(st,nowParts().h)}
   return Math.max(0,Math.floor((T-st-1)*4)/4);
 }
 function buildPlan(){
@@ -280,7 +298,7 @@ function timerNotify(){
   const goal=T.goalH*3600e3;
   if(T.start){
     const end=new Date(Date.now()+Math.max(0,goal-tElapsed()));
-    notify('Estudiando '+nm,(goal>tElapsed()?'Objetivo de hoy hacia las '+end.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}):'Objetivo de hoy cumplido')+' · Toca para abrir',{silent:true,renotify:false,requireInteraction:true,timestamp:T.start-(T.acc||0)});
+    notify('Estudiando '+nm,(goal>tElapsed()?'Objetivo de hoy hacia las '+clockAt(end.getTime()):'Objetivo de hoy cumplido')+' · Toca para abrir',{silent:true,renotify:false,requireInteraction:true,timestamp:T.start-(T.acc||0)});
   }else notify('En pausa: '+nm,'Llevas '+fmtH(tElapsed()/3600e3)+'. Toca para reanudar.',{silent:true,requireInteraction:true});
 }
 function scheduleGoal(){
@@ -365,6 +383,11 @@ function tick(){
     if(T.start&&!T.notified&&goal>0&&rem<=0)goalReached();
   }
 }
+/* Si la app está abierta a medianoche (o vuelves a ella otro día), se recalcula sola. */
+let shownDay=null;
+function dayWatch(){const d=today();if(shownDay&&d!==shownDay){shownDay=d;if(!editing&&!splitDate)render()}shownDay=d}
+setInterval(dayWatch,30e3);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')dayWatch()});
 function startTicker(){clearInterval(tickT);tickT=setInterval(()=>{if(state.timer?.start&&document.visibilityState==='visible')tick()},1000)}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&state.timer){tick();scheduleGoal()}});
 
@@ -473,7 +496,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.12.0';
+const APP_VERSION='1.13.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -687,6 +710,9 @@ function vAsig(){
 function vAjustes(){
   const H=state.settings.hours;const week=H.reduce((a,b)=>a+(+b||0),0);
   return`<header class="stack" style="gap:6px"><h1>Ajustes</h1><span class="muted">Cuánto tiempo puedes estudiar cada día de la semana. El plan nunca te pide más de esto.</span></header>
+  <section class="card"><h2>Cambio de día</h2><span class="muted">El plan pasa al día siguiente a las 00:00 de esta zona horaria, también tras el cambio de hora.</span>
+  <label class="f" for="s-tz">Zona horaria<select id="s-tz" data-tz>${Object.entries(TZ_OPTS).map(([v,l])=>`<option value="${v}" ${(state.settings.tz||'auto')===v?'selected':''}>${l}</option>`).join('')}</select></label>
+  <span class="savestate">Hora de la app ahora: <span class="num">${nowParts().hm}</span> · ${esc(appTZ())}${detectedTZ()&&detectedTZ()!==appTZ()?' (el móvil dice '+esc(detectedTZ())+')':''}. Si no coincide con la hora de tu móvil, elige tu zona arriba.</span></section>
   <section class="card"><h2>Apariencia</h2>
   <div class="seg" style="grid-template-columns:repeat(3,1fr)">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([v,l])=>`<button data-theme-set="${v}" aria-pressed="${(state.settings.theme||'auto')===v}" style="font-family:var(--body);font-weight:700">${l}</button>`).join('')}</div>
   <span class="muted" style="font-size:.85rem">Automático sigue el modo claro u oscuro de tu móvil.</span></section>
@@ -860,6 +886,7 @@ document.addEventListener('input',e=>{if(e.target.id==='tadjmin'&&tAdj!=null){co
 document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='tadjmin'&&tAdj!=null){e.preventDefault();timerAdjSave();return}if(e.target.id==='smin'&&splitEdit){e.preventDefault();splitCustom(splitEdit.sign)}else if(e.target.id==='spct'&&splitPctEdit){e.preventDefault();splitPct()}});
 document.addEventListener('change',e=>{
   const el=e.target;
+  if('tz' in el.dataset){state.settings.tz=el.value;save();render();toast('Hora de la app: '+nowParts().hm);return}
   if('start' in el.dataset){state.settings.start=el.value||'09:00';save();render();return}
   if(el.dataset.hours!=null){state.settings.hours[+el.dataset.hours]=Math.max(0,Math.min(16,+el.value||0));save();render();return}
   const s=editing&&findS(editing);if(!s)return;
