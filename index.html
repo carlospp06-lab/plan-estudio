@@ -272,6 +272,26 @@ function markDone(sid,h,first){
   const L=(state.log[t]??={});if(L[sid]){L[sid].h+=h;L[sid].d.push(...d)}else L[sid]={h,d};
   logOpen=null;save();toast('Registrado: '+fmtH(h));render();
 }
+/* Completar un concepto ya dominado: se da por terminado entero (todas sus horas) sin contar
+   como tiempo estudiado hoy; el tiempo que liberas hoy se reparte en lo demás. Se puede deshacer. */
+function completeUnit(sid,uid){
+  const s=findS(sid);if(!s)return;
+  const tp=uid==='__rev'?null:s.topics.find(x=>x.id===uid);
+  const name=tp?tp.name:'Repaso general';
+  const left=tp?Math.max(0,(+tp.hours||0)-(+tp.studied||0)):Math.max(0,reviewHours(s)-(+s.reviewStudied||0));
+  if(!confirm(`¿Dar por dominado «${name}»?\nSe marcará el concepto entero como terminado (le quedaban ${fmtH(left)}) y ese tiempo se dedicará a otras cosas.`))return;
+  const T=state.timer;
+  if(T&&T.sid===sid&&(T.unit||null)===(uid||null)){const ms=tElapsed();state.timer=null;clearTimeout(goalT);clearNotify();if(ms>=60e3)markDone(sid,ms/3600e3,uid)}
+  const now=tp?Math.max(0,(+tp.hours||0)-(+tp.studied||0)):Math.max(0,reviewHours(s)-(+s.reviewStudied||0));
+  (state.mastered??=[]).push({date:today(),sid,uid,name,h:now});
+  if(tp)tp.studied=+tp.hours||0;else s.reviewStudied=reviewHours(s);
+  save();toast('✓ Dominado: '+name);render();
+}
+function uncompleteUnit(k){
+  const m=state.mastered?.[k];if(!m)return;const s=findS(m.sid);
+  if(s){if(m.uid==='__rev')s.reviewStudied=Math.max(0,(+s.reviewStudied||0)-m.h);else{const tp=s.topics.find(x=>x.id===m.uid);if(tp)tp.studied=Math.max(0,(+tp.studied||0)-m.h)}}
+  state.mastered.splice(k,1);save();toast('Deshecho: '+m.name);render();
+}
 function undoDone(sid){
   const t=today(),e=state.log[t]?.[sid];if(!e)return;const s=findS(sid);
   if(s)e.d.forEach(([id,a])=>{if(id==='__rev')s.reviewStudied=Math.max(0,(+s.reviewStudied||0)-a);else{const tp=s.topics.find(x=>x.id===id);if(tp)tp.studied=Math.max(0,(+tp.studied||0)-a)}});
@@ -496,11 +516,11 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.13.0';
+const APP_VERSION='1.14.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
-function prune(){const lim=addDays(today(),-60);for(const k of Object.keys(state.log))if(k<lim)delete state.log[k];if(state.overrides)for(const k of Object.keys(state.overrides))if(k<today())delete state.overrides[k]}
+function prune(){const lim=addDays(today(),-60);if(state.mastered)state.mastered=state.mastered.filter(m=>m.date>=addDays(today(),-7));for(const k of Object.keys(state.log))if(k<lim)delete state.log[k];if(state.overrides)for(const k of Object.keys(state.overrides))if(k<today())delete state.overrides[k]}
 function writeNow(){
   prune();state.schema=SCHEMA;
   try{
@@ -659,7 +679,8 @@ function vHoy(){
         ${dH>0&&!isDone?`<div class="bar" aria-hidden="true"><span style="width:${dH/it.h*100}%;background:var(--c)"></span></div><span class="muted" style="font-size:.9rem">Llevas <span class="num">${fmtH(dH)}</span> · quedan <span class="num">${fmtH(left)}</span></span>`:''}
         ${isDone&&dH>it.h+0.01?`<span class="muted" style="font-size:.9rem">Has hecho <span class="num">${fmtH(dH)}</span>, más de lo previsto</span>`:''}
         ${(()=>{const T=state.timer;if(!T||T.sid!==s.id)return'';if(T.unit&&tps.some(x=>x.u.id===T.unit))return'';return `${T.uname?`<strong>${esc(T.uname)}</strong>`:''}`+timerBlock(s,T.unit,T.goalH,T.uname)})()}
-        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus?`<span class="topics">${esc(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where">Apuntes: ${esc(x.t.where)}</span>`:''}${timerBlock(s,x.u.id,Math.round(x.h*60)/60,x.u.name)}</li>`).join('')}</ul>`:''}
+        ${(state.mastered||[]).map((m,k)=>m.date===t&&m.sid===s.id?`<div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px;font-size:.9rem"><span style="min-width:0"><span style="color:var(--ok);font-weight:700">✓ Dominado:</span> ${esc(m.name)}</span><button class="ghost" data-uundo="${k}" style="min-height:0;padding:2px 4px;font-size:.85rem;text-decoration:underline">Deshacer</button></div>`:'').join('')}
+        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus?`<span class="topics">${esc(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where">Apuntes: ${esc(x.t.where)}</span>`:''}${timerBlock(s,x.u.id,Math.round(x.h*60)/60,x.u.name)}<button class="ghost" data-ucomplete="${x.u.id}" data-usid="${s.id}" style="align-self:stretch;min-height:40px;border:1px dashed var(--line)">✓ Completar (ya lo domino)</button></li>`).join('')}</ul>`:''}
         <div class="row" style="justify-content:space-between"><span class="muted" style="font-size:.85rem">${s.exam===t?'Repaso antes del examen de las '+esc(s.time):'Examen '+until(s.exam)}</span>
         ${isDone&&logOpen!==s.id?`<button class="ghost" data-undo="${s.id}">✓ Hecho · Deshacer</button>`:''}</div>
         ${logOpen===s.id?`<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="eyebrow">¿Cuánto has estudiado?</span>
@@ -852,6 +873,8 @@ document.addEventListener('click',e=>{
   if('tpause' in ds)return timerPause();
   if('tstop' in ds)return timerStop();
   if('tdiscard' in ds)return timerDiscard();
+  if(ds.ucomplete)return completeUnit(ds.usid,ds.ucomplete);
+  if(ds.uundo!=null)return uncompleteUnit(+ds.uundo);
   if('tadj' in ds)return tAdj!=null?(tAdj=null,render()):timerAdjOpen();
   if(ds.tadjstep)return timerAdjStep(+ds.tadjstep);
   if('tadjsave' in ds)return timerAdjSave();
