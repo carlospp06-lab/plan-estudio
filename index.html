@@ -329,7 +329,7 @@ const tElapsed=()=>{const T=state.timer;if(!T)return 0;return (T.acc||0)+(T.star
 const fmtClock=ms=>{const t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=t%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(x).padStart(2,'0')};
 function todayLeft(sid){const it=(buildPlan().days[0]?.items||[]).find(x=>x.sid===sid);if(!it)return 0;return Math.max(0,it.h-(state.log[today()]?.[sid]?.h||0))}
 async function swReg(){try{return 'serviceWorker' in navigator?await navigator.serviceWorker.getRegistration():null}catch(e){return null}}
-async function notify(title,body,opts={}){
+async function notify(title,body,opts={}){title=plainTx(title);body=plainTx(body);
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   const r=await swReg();const o={body,icon:'icons/icon-192.png',badge:'icons/icon-192.png',tag:'plan-timer',lang:'es',...opts};
   try{if(r)await r.showNotification(title,o);else new Notification(title,o)}catch(e){}
@@ -415,7 +415,7 @@ function timerBar(){
   document.body.classList.toggle('has-timerbar',show);
   if(!show){b.hidden=true;return}
   b.hidden=false;b.style.setProperty('--c',s.color);
-  b.innerHTML=`<span class="nm">${T.start?'<span class="pulse"></span>':'❚❚ '}${esc(tLabel(T))}</span><span class="num" data-tclock>${fmtClock(tElapsed())}</span>${T.start?'<button data-tpause>Pausar</button>':`<button data-tstart="${s.id}" data-tunit="${esc(T.unit||'')}" data-tgoalh="${T.goalH}" data-tuname="${esc(T.uname||'')}">Reanudar</button>`}<button data-tstop>Parar</button>`;
+  b.innerHTML=`<span class="nm">${T.start?'<span class="pulse"></span>':'❚❚ '}${tx(tLabel(T))}</span><span class="num" data-tclock>${fmtClock(tElapsed())}</span>${T.start?'<button data-tpause>Pausar</button>':`<button data-tstart="${s.id}" data-tunit="${esc(T.unit||'')}" data-tgoalh="${T.goalH}" data-tuname="${esc(T.uname||'')}">Reanudar</button>`}<button data-tstop>Parar</button>`;
 }
 function tick(){
   const T=state.timer;
@@ -514,15 +514,15 @@ function renderSplit(){
   <span class="muted">Pulsa + o − y escribe los minutos, o toca el porcentaje para escribirlo (hasta 100 %); después eliges de qué asignatura sale (o a cuál va) ese tiempo. El total se mantiene en <span class="num">${fmtH(splitTotal)}</span>; lo que quites hoy se reparte en los días siguientes.</span></header>
   <div class="bar" style="height:14px" aria-hidden="true">${ids.map(i=>`<span style="width:${splitDraft[i]/tot*100}%;background:${findS(i).color}"></span>`).join('')}</div>
   <section class="card" style="padding-block:4px">${ids.map(i=>{const s=findS(i);return`<div class="splitrow">
-    <div style="min-width:0"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="dot" style="background:${s.color}"></span><strong style="min-width:0">${esc(s.name)}</strong></div><span class="muted" style="font-size:.85rem">Examen ${until(s.exam)}</span></div>
-    <button class="ghost pct" data-spct="${i}" aria-label="Cambiar el porcentaje de ${esc(s.name)}" style="min-height:0;padding:4px 6px;text-decoration:underline dotted;text-underline-offset:5px;text-decoration-thickness:2px">${Math.round(splitDraft[i]/tot*100)}%</button>
-    <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sopen="${i}" data-sign="-1" aria-label="Menos tiempo para ${esc(s.name)}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign<0}" style="font-size:1.3rem">−</button><span class="num">${fmtH(splitDraft[i])}</span><button data-sopen="${i}" data-sign="1" aria-label="Más tiempo para ${esc(s.name)}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign>0}" style="font-size:1.3rem">+</button></div>
-    ${splitPctEdit===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="spct">Porcentaje de hoy para ${esc(s.name)}</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="spct" type="number" inputmode="numeric" min="0" max="100" step="1" value="${Math.round(splitDraft[i]/tot*100)}" style="flex:1;min-width:0"><span class="num">%</span><button class="primary" data-spctok>Siguiente</button></div><span class="muted" style="font-size:.85rem">Pon 100 % para dedicar el día entero a esta asignatura.</span><button class="ghost" data-spctcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
+    <div style="min-width:0"><div class="row" style="gap:8px;flex-wrap:nowrap"><span class="dot" style="background:${s.color}"></span><strong style="min-width:0" class="tx">${tx(s.name)}</strong></div><span class="muted" style="font-size:.85rem">Examen ${until(s.exam)}</span></div>
+    <button class="ghost pct" data-spct="${i}" aria-label="Cambiar el porcentaje de ${esc(plainTx(s.name))}" style="min-height:0;padding:4px 6px;text-decoration:underline dotted;text-underline-offset:5px;text-decoration-thickness:2px">${Math.round(splitDraft[i]/tot*100)}%</button>
+    <div class="ctl" style="grid-column:1/-1;justify-content:space-between"><button data-sopen="${i}" data-sign="-1" aria-label="Menos tiempo para ${esc(plainTx(s.name))}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign<0}" style="font-size:1.3rem">−</button><span class="num">${fmtH(splitDraft[i])}</span><button data-sopen="${i}" data-sign="1" aria-label="Más tiempo para ${esc(plainTx(s.name))}" aria-pressed="${splitEdit?.sid===i&&splitEdit.sign>0}" style="font-size:1.3rem">+</button></div>
+    ${splitPctEdit===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="spct">Porcentaje de hoy para ${tx(s.name)}</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="spct" type="number" inputmode="numeric" min="0" max="100" step="1" value="${Math.round(splitDraft[i]/tot*100)}" style="flex:1;min-width:0"><span class="num">%</span><button class="primary" data-spctok>Siguiente</button></div><span class="muted" style="font-size:.85rem">Pon 100 % para dedicar el día entero a esta asignatura.</span><button class="ghost" data-spctcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
     ${splitEdit?.sid===i?`<div class="stack" style="grid-column:1/-1;gap:8px;background:var(--bg);border-radius:10px;padding:10px"><label class="f" for="smin">${splitEdit.sign>0?'¿Cuántos minutos MÁS?':'¿Cuántos minutos MENOS?'}</label><div class="row" style="flex-wrap:nowrap;gap:8px"><input id="smin" type="number" inputmode="numeric" min="1" step="1" placeholder="Ej. 20" style="flex:1;min-width:0"><button class="primary" data-scustom="${splitEdit.sign}">Siguiente</button></div><button class="ghost" data-seditcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
     ${splitPending?.sid===i?`<div id="spicker" class="stack" style="grid-column:1/-1;gap:8px;border:2px solid var(--mark);border-radius:10px;padding:10px"><strong>${(()=>{const T=Object.values(splitDraft).reduce((a,b)=>a+b,0),pc=Math.round(Math.abs(splitPending.dv)/T*100);return splitPending.dv>0?`¿De qué asignatura quito ${fmtH(splitPending.dv)} (${pc} %)?`:`¿A qué asignatura le doy ${fmtH(-splitPending.dv)} (${pc} %)?`})()}</strong>
       ${(()=>{const T=Object.values(splitDraft).reduce((a,b)=>a+b,0),all=splitPending.dv>0&&splitDraft[i]+splitPending.dv>=T-1/120;return `<button class="${all?'mark':''}" data-spick="__all" style="justify-content:flex-start">${all?'Quitar las demás asignaturas de este día':'Repartirlo entre todas las demás'}</button>`})()}
       ${splitPending.dv>0&&splitDraft[i]+splitPending.dv>=Object.values(splitDraft).reduce((a,b)=>a+b,0)-1/120?'':`<span class="muted" style="font-size:.85rem">O elige una:</span>`}
-      ${splitPending.dv>0&&splitDraft[i]+splitPending.dv>=Object.values(splitDraft).reduce((a,b)=>a+b,0)-1/120?'':splitPartners(i,splitPending.dv).map(x=>{const o=findS(x.i);return`<button data-spick="${x.i}" ${x.ok?'':'disabled'} style="justify-content:space-between"><span class="row" style="gap:8px;flex-wrap:nowrap;min-width:0"><span class="dot" style="background:${o.color}"></span><span style="min-width:0;text-align:left">${esc(o.name)}</span></span><span class="num muted" style="font-weight:400">${splitPending.dv>0?'tiene '+fmtH(splitDraft[x.i]):'puede +'+fmtH(x.room)}</span></button>`}).join('')}
+      ${splitPending.dv>0&&splitDraft[i]+splitPending.dv>=Object.values(splitDraft).reduce((a,b)=>a+b,0)-1/120?'':splitPartners(i,splitPending.dv).map(x=>{const o=findS(x.i);return`<button data-spick="${x.i}" ${x.ok?'':'disabled'} style="justify-content:space-between"><span class="row" style="gap:8px;flex-wrap:nowrap;min-width:0"><span class="dot" style="background:${o.color}"></span><span style="min-width:0;text-align:left">${tx(o.name)}</span></span><span class="num muted" style="font-weight:400">${splitPending.dv>0?'tiene '+fmtH(splitDraft[x.i]):'puede +'+fmtH(x.room)}</span></button>`}).join('')}
       <button class="ghost" data-spickcancel style="align-self:flex-start;min-height:0;padding:2px 0;font-size:.85rem">Cancelar</button></div>`:''}
   </div>`}).join('')}</section>
   <div class="row"><button class="primary" data-splitsave style="flex:1">Guardar reparto</button>${custom?'<button data-splitreset>Volver al automático</button>':''}</div>
@@ -539,7 +539,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.16.0';
+const APP_VERSION='1.17.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -613,7 +613,9 @@ function mergeSubjects(list){
     const old=state.subjects.find(s=>normName(s.name)===normName(raw.name));
     /* Actualización parcial: si el archivo no trae temas, se conservan los que ya hay
        (sirve para cambiar solo la dificultad, la fecha, etc.). */
-    if(old&&!Array.isArray(raw.topics)){const {name,...rest}=raw;Object.assign(old,rest,{id:old.id,topics:old.topics});updated.push(old.name);continue}
+    /* topicsPatch: cambia solo los campos indicados de cada tema (buscado por nombre); conserva horas y progreso. */
+    if(old&&Array.isArray(raw.topicsPatch)){for(const tp of raw.topicsPatch){const t=old.topics.find(x=>normName(x.name)===normName(tp.name));if(t){const {name,id,studied,...f}=tp;Object.assign(t,f)}}}
+    if(old&&!Array.isArray(raw.topics)){const {name,topicsPatch,...rest}=raw;Object.assign(old,rest,{id:old.id,topics:old.topics});updated.push(old.name);continue}
     if(!old&&!Array.isArray(raw.topics))continue;
     if(old){
       const prev=new Map(old.topics.map(t=>[normName(t.name),t]));
@@ -673,9 +675,9 @@ if('serviceWorker' in navigator&&location.protocol!=='file:'){
 try{if(sessionStorage.getItem('plan-updated')){sessionStorage.removeItem('plan-updated');setTimeout(()=>toast('App actualizada a la versión '+APP_VERSION),300)}}catch(e){}
 
 /* ---------- UI helpers ---------- */
-let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,2200)}
+let toastT;function toast(m){const t=$('#toast');t.textContent=plainTx(m);t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,2200)}
 function nextExam(){return state.subjects.filter(s=>s.exam&&s.exam>=today()).sort((a,b)=>a.exam.localeCompare(b.exam))[0]}
-function warnBox(unmet){if(!unmet.length)return'';return`<div class="warnbox" role="alert"><strong>No llegas a todo con tus horas actuales</strong>${unmet.map(u=>`<span>${esc(u.s.name)}: faltarían <span class="num">${fmtH(u.h)}</span> antes del examen.</span>`).join('')}<span>Sube las horas disponibles en Ajustes, reduce el margen o revisa las horas de los temas.</span></div>`}
+function warnBox(unmet){if(!unmet.length)return'';return`<div class="warnbox" role="alert"><strong>No llegas a todo con tus horas actuales</strong>${unmet.map(u=>`<span>${tx(u.s.name)}: faltarían <span class="num">${fmtH(u.h)}</span> antes del examen.</span>`).join('')}<span>Sube las horas disponibles en Ajustes, reduce el margen o revisa las horas de los temas.</span></div>`}
 
 const KIND={teoria:'Teoría',problema:'Problema',practica:'Práctica de examen'};
 /* ---------- fórmulas: LaTeX → MathML ----------
@@ -727,7 +729,7 @@ function texParse(src,block,mode){
     if(v==='underline'){const g=group();return M?`<munder accentunder="true">${g}<mo>_</mo></munder>`:g}
     if(/^(left|right|big|Big|bigg|Bigg)$/.test(v)){const d=next();if(!d)return'';const ch=d.t==='cmd'?(TEXOP[d.v]||d.v):d.v;if(ch==='.')return'';return M?`<mo stretchy="true">${xe(ch)}</mo>`:ch}
     if(v==='\\')return M?'<mspace linebreak="newline"/>':'\n';
-    if(TEXFN.includes(v))return M?`<mi mathvariant="normal">${v}</mi><mo>&#x2061;</mo>`:(v==='arctan'?'arctg':v)+' ';
+    if(TEXFN.includes(v)){const lim=peek()&&peek().t==='ch'&&(peek().v==='_'||peek().v==='^');return M?(lim?`<mi mathvariant="normal">${v}</mi>`:`<mi mathvariant="normal">${v}</mi><mo>&#x2061;</mo>`):(v==='arctan'?'arctg':v)+(lim?'':' ')}
     if(TEXSYM[v])return M?`<mi>${TEXSYM[v]}</mi>`:TEXSYM[v];
     if(TEXOP[v]!=null){const o=TEXOP[v];if(!o.trim())return M?'<mspace width="0.25em"/>':(v===','?' ':' ');return M?`<mo>${xe(o)}</mo>`:(/^[·×÷±≤≥≠≈→⇒=]$/.test(o)?' '+o+' ':o)}
     return M?`<mtext>${xe(v)}</mtext>`:v;
@@ -779,8 +781,8 @@ function openDetail(sid,tid){
   const title=t?t.name:'Análisis de exámenes';
   const parts=t?[t.focus&&{h:'Qué dominar',b:t.focus},t.freq&&{h:'En exámenes',b:t.freq},t.where&&{h:'Dónde está en los apuntes',b:t.where}].filter(Boolean):[{h:'',b:s.analysis},...(s.omitted?.length?[{h:'Lo que puedes saltarte',b:s.omitted.map(x=>'• '+x).join('\n')}]:[])];
   $('#detail').innerHTML=`<main><div class="sheethead"><button class="ghost" data-detailclose>← Volver</button><button class="primary" data-detailcopy>Copiar</button></div>
-    <header class="stack" style="gap:6px"><span class="eyebrow" style="color:${s.color}">${esc(s.name)}</span><h1 class="tx" style="font-size:1.6rem">${tx(title)}</h1>${t&&(t.kind||t.importance)?`<div class="row" style="gap:6px">${kindChip(t)}${impDots(t)}</div>`:''}</header>
-    <section class="card body">${parts.map(x=>`${x.h?`<span class="eyebrow">${esc(x.h)}</span>`:''}${String(x.b).split(/\n+/).map(par=>`<p class="tx">${tx(par)}</p>`).join('')}`).join('')}</section></main>`;
+    <header class="stack" style="gap:6px"><span class="eyebrow" style="color:${s.color}">${tx(s.name)}</span><h1 class="tx" style="font-size:1.6rem">${tx(title)}</h1>${t&&(t.kind||t.importance)?`<div class="row" style="gap:6px">${kindChip(t)}${impDots(t)}</div>`:''}</header>
+    <section class="card body">${parts.map(x=>`${x.h?`<span class="eyebrow">${tx(x.h)}</span>`:''}${String(x.b).split(/\n+/).map(par=>`<p class="tx">${tx(par)}</p>`).join('')}`).join('')}</section></main>`;
   $('#detail').hidden=false;document.body.style.overflow='hidden';$('#detail').scrollTop=0;
   setTimeout(()=>$('#detail [data-detailclose]')?.focus(),30);
 }
@@ -790,7 +792,7 @@ async function copyDetail(){
   const plain=t?[t.name,t.focus&&('Qué dominar: '+t.focus),t.freq&&('En exámenes: '+t.freq),t.where&&('Apuntes: '+t.where)].filter(Boolean).join('\n\n'):[s.name+' · Análisis de exámenes',s.analysis,...(s.omitted||[]).map(x=>'• '+x)].join('\n\n');
   const html=$('#detail .body')?.innerHTML||'';
   try{
-    if(window.ClipboardItem&&navigator.clipboard?.write){await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([plainTx(plain)],{type:'text/plain'}),'text/html':new Blob([`<h3>${esc(t?t.name:s.name)}</h3>`+html],{type:'text/html'})})])}
+    if(window.ClipboardItem&&navigator.clipboard?.write){await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob([plainTx(plain)],{type:'text/plain'}),'text/html':new Blob([`<h3>${tx(t?t.name:s.name)}</h3>`+html],{type:'text/html'})})])}
     else await navigator.clipboard.writeText(plainTx(plain));
     toast('Texto copiado');
   }catch(e){
@@ -813,18 +815,18 @@ function vHoy(){
   ${items.length?`<h1>Hoy toca <span class="hl">${fmtH(total)}</span></h1><div class="bar" aria-hidden="true"><span style="width:${total?done/total*100:0}%;background:var(--ok)"></span></div><span class="muted">Hecho: <span class="num">${fmtH(done)}</span> de <span class="num">${fmtH(total)}</span></span>`
   :`<h1>${day&&day.cap===0?'Hoy es <span class="hl">día libre</span>':'Nada pendiente para hoy'}</h1><span class="muted">${state.subjects.some(s=>s.exam&&s.topics.length)?'Disfruta. El plan sigue mañana.':'Añade la fecha del examen y el temario de tus asignaturas para generar el plan.'}</span>`}
   </header>`;
-  if(ne)h+=`<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span class="dot" style="background:${ne.color}"></span><div style="flex:1;min-width:0"><div class="eyebrow">Próximo examen</div><strong>${esc(ne.name)}</strong> <span class="muted">· ${esc(fmtDate(ne.exam))}${ne.time?' · '+esc(ne.time):''}</span></div><span class="chip exam">${until(ne.exam)}</span></div>`;
+  if(ne)h+=`<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span class="dot" style="background:${ne.color}"></span><div style="flex:1;min-width:0"><div class="eyebrow">Próximo examen</div><strong>${tx(ne.name)}</strong> <span class="muted">· ${esc(fmtDate(ne.exam))}${ne.time?' · '+esc(ne.time):''}</span></div><span class="chip exam">${until(ne.exam)}</span></div>`;
   h+=warnBox(unmet);
   if(items.length){h+=`<section class="stack"><h2>Sesiones de hoy</h2>`;
     for(const it of items){const s=findS(it.sid);const dH=tl[it.sid]?.h||0;const left=Math.max(0,it.h-dH);const isDone=left<0.01;
       const tps=isDone?[]:topicsSlice(s,0,left,true);
       h+=`<article class="card session ${isDone?'done':''}" style="--c:${s.color}">
-        <div class="row" style="justify-content:space-between"><h3>${esc(s.name)}</h3><span class="num" style="font-size:1.1rem">${fmtH(it.h)}</span></div>
+        <div class="row" style="justify-content:space-between"><h3 class="tx">${tx(s.name)}</h3><span class="num" style="font-size:1.1rem">${fmtH(it.h)}</span></div>
         ${dH>0&&!isDone?`<div class="bar" aria-hidden="true"><span style="width:${dH/it.h*100}%;background:var(--c)"></span></div><span class="muted" style="font-size:.9rem">Llevas <span class="num">${fmtH(dH)}</span> · quedan <span class="num">${fmtH(left)}</span></span>`:''}
         ${isDone&&dH>it.h+0.01?`<span class="muted" style="font-size:.9rem">Has hecho <span class="num">${fmtH(dH)}</span>, más de lo previsto</span>`:''}
-        ${(()=>{const T=state.timer;if(!T||T.sid!==s.id)return'';if(T.unit&&tps.some(x=>x.u.id===T.unit))return'';return `${T.uname?`<strong>${esc(T.uname)}</strong>`:''}`+timerBlock(s,T.unit,T.goalH,T.uname)})()}
-        ${(state.mastered||[]).map((m,k)=>m.date===t&&m.sid===s.id?`<div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px;font-size:.9rem"><span style="min-width:0"><span style="color:var(--ok);font-weight:700">✓ Completado:</span> ${esc(m.name)}</span><button class="ghost" data-uundo="${k}" style="min-height:0;padding:2px 4px;font-size:.85rem;text-decoration:underline">Deshacer</button></div>`:'').join('')}
-        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0">${esc(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus||x.t?.where?`<div class="readable" role="button" tabindex="0" data-detail="${x.u.id}" data-dsid="${s.id}" aria-label="Leer en grande: ${esc(x.u.name)}">${x.t?.focus?`<span class="topics tx" style="display:block">${tx(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where tx" style="display:block">Apuntes: ${tx(x.t.where)}</span>`:''}<span class="readhint">Toca para leerlo en grande ↗</span></div>`:''}${timerBlock(s,x.u.id,Math.round(x.h*60)/60,x.u.name)}<button class="ghost" data-ucomplete="${x.u.id}" data-usid="${s.id}" style="align-self:stretch;min-height:40px;border:1px dashed var(--line)">✓ Completar</button></li>`).join('')}</ul>`:''}
+        ${(()=>{const T=state.timer;if(!T||T.sid!==s.id)return'';if(T.unit&&tps.some(x=>x.u.id===T.unit))return'';return `${T.uname?`<strong class="tx">${tx(T.uname)}</strong>`:''}`+timerBlock(s,T.unit,T.goalH,T.uname)})()}
+        ${(state.mastered||[]).map((m,k)=>m.date===t&&m.sid===s.id?`<div class="row" style="justify-content:space-between;flex-wrap:nowrap;gap:8px;font-size:.9rem"><span style="min-width:0"><span style="color:var(--ok);font-weight:700">✓ Completado:</span> ${tx(m.name)}</span><button class="ghost" data-uundo="${k}" style="min-height:0;padding:2px 4px;font-size:.85rem;text-decoration:underline">Deshacer</button></div>`:'').join('')}
+        ${tps.length?`<ul class="clist">${tps.map(x=>`<li><div class="row" style="gap:6px;justify-content:space-between;flex-wrap:nowrap"><strong style="min-width:0" class="tx">${tx(x.u.name)}</strong><span class="num muted" style="white-space:nowrap">${fmtH(x.h)}</span></div>${x.t?.kind||x.t?.importance?`<div class="row" style="gap:6px">${kindChip(x.t)}${impDots(x.t)}</div>`:''}${x.t?.focus||x.t?.where?`<div class="readable" role="button" tabindex="0" data-detail="${x.u.id}" data-dsid="${s.id}" aria-label="Leer en grande: ${esc(plainTx(x.u.name))}">${x.t?.focus?`<span class="topics tx" style="display:block">${tx(x.t.focus)}</span>`:''}${x.t?.where?`<span class="where tx" style="display:block">Apuntes: ${tx(x.t.where)}</span>`:''}<span class="readhint">Toca para leerlo en grande ↗</span></div>`:''}${timerBlock(s,x.u.id,Math.round(x.h*60)/60,x.u.name)}<button class="ghost" data-ucomplete="${x.u.id}" data-usid="${s.id}" style="align-self:stretch;min-height:40px;border:1px dashed var(--line)">✓ Completar</button></li>`).join('')}</ul>`:''}
         <div class="row" style="justify-content:space-between"><span class="muted" style="font-size:.85rem">${s.exam===t?'Repaso antes del examen de las '+esc(s.time):'Examen '+until(s.exam)}</span>
         ${isDone&&logOpen!==s.id?`<button class="ghost" data-undo="${s.id}">✓ Hecho · Deshacer</button>`:''}</div>
         ${logOpen===s.id?`<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px"><span class="eyebrow">¿Cuánto has estudiado?</span>
@@ -851,9 +853,9 @@ function vPlan(){
     h+=`<div class="dayrow"><div class="d">${esc(fmtDate(d.date,{weekday:'short'}))}<br>${pd(d.date).getDate()}<small>${esc(fmtDate(d.date,{month:'short'}))}</small></div><div style="min-width:0">
     <div class="row" style="justify-content:space-between;gap:6px"><span class="num">${d.cap?fmtH(tot)+' / '+fmtH(d.cap):'Día libre'}</span><span class="row" style="gap:6px">${d.custom?'<span class="chip custom">A mano</span>':''}${d.over>0.05&&!d.custom?'<span class="chip warn">Día cargado</span>':''}${d.cap&&d.items.length?`<button class="ghost" data-split="${d.date}" style="min-height:32px;padding:4px 8px;font-size:.8rem">Ajustar</button>`:''}</span></div>
     ${d.cap?`<div class="bar" style="margin-top:6px">${d.items.map(x=>`<span style="width:${x.h/d.cap*100}%;background:${findS(x.sid).color}"></span>`).join('')}</div>`:''}
-    <ul>${d.items.map(x=>{const s=findS(x.sid);return`<li><span class="dot" style="background:${s.color}"></span>${esc(s.name)}<span class="num">${fmtH(x.h)}</span></li>`}).join('')}
-    ${(exams[d.date]||[]).map(s=>`<li><span class="chip exam">Examen${s.time?' '+esc(s.time):''}</span> ${esc(s.name)}</li>`).join('')}
-    ${(exams[addDays(d.date,1)]||[]).map(s=>`<li><span class="chip">Mañana examen</span> ${esc(s.name)}</li>`).join('')}</ul></div></div>`}
+    <ul>${d.items.map(x=>{const s=findS(x.sid);return`<li><span class="dot" style="background:${s.color}"></span>${tx(s.name)}<span class="num">${fmtH(x.h)}</span></li>`}).join('')}
+    ${(exams[d.date]||[]).map(s=>`<li><span class="chip exam">Examen${s.time?' '+esc(s.time):''}</span> ${tx(s.name)}</li>`).join('')}
+    ${(exams[addDays(d.date,1)]||[]).map(s=>`<li><span class="chip">Mañana examen</span> ${tx(s.name)}</li>`).join('')}</ul></div></div>`}
   const lastD=show.at(-1).date;const ex=Object.keys(exams).filter(k=>k>lastD&&k<=addDays(lastD,1));
   h+=`</section>`;
   return h;
@@ -865,7 +867,7 @@ function vAsig(){
   const list=state.subjects.slice().sort((a,b)=>(a.exam||'9').localeCompare(b.exam||'9'));
   for(const s of list){const tot=totalH(s),st=tot-remaining(s);
     h+=`<button class="card" data-edit="${s.id}" style="text-align:left;align-items:stretch;font-weight:400;cursor:pointer">
-      <div class="row" style="justify-content:space-between"><span class="row" style="gap:8px"><span class="dot" style="background:${s.color}"></span><h3>${esc(s.name)}</h3></span>${s.exam?`<span class="chip ${s.exam>=today()?'exam':''}">${s.exam>=today()?until(s.exam):'Examen pasado'}</span>`:'<span class="chip warn">Sin fecha</span>'}</div>
+      <div class="row" style="justify-content:space-between"><span class="row" style="gap:8px"><span class="dot" style="background:${s.color}"></span><h3 class="tx">${tx(s.name)}</h3></span>${s.exam?`<span class="chip ${s.exam>=today()?'exam':''}">${s.exam>=today()?until(s.exam):'Examen pasado'}</span>`:'<span class="chip warn">Sin fecha</span>'}</div>
       <span class="muted" style="font-size:.9rem">${s.exam?esc(fmtDate(s.exam,{weekday:'long',day:'numeric',month:'long'})):'Añade la fecha del examen'} · ${s.topics.length} temas · ${DIFF[s.difficulty-1]} · prioridad ${PRIO[effPrio(s)-1].toLowerCase()}${isPrioAuto(s)?' (auto)':''}</span>
       <div class="bar"><span style="width:${tot?st/tot*100:0}%;background:${s.color}"></span></div>
       <span class="num muted" style="font-size:.85rem">${fmtH(st)} de ${fmtH(tot)} estudiadas</span></button>`}
@@ -911,7 +913,7 @@ function renderSheet(){
   <span class="muted" style="font-size:.85rem;margin-top:-8px">${s.time?'Ese día tendrás un repaso antes del examen.':'Pon la hora para aprovechar también el día del examen.'}</span>
   ${s.exam?`<a class="btn" href="${gcalLink(s)}" target="_blank" rel="noopener">Añadir examen a Google Calendar</a>`:''}
   <div class="stack" style="gap:6px"><span class="eyebrow">Dificultad</span><div class="seg">${[1,2,3,4,5].map(n=>`<button data-diff="${n}" aria-pressed="${s.difficulty===n}" aria-label="${DIFF[n-1]}">${n}</button>`).join('')}</div><div class="seg-l"><span>Muy fácil</span><span>${DIFF[s.difficulty-1]}</span><span>Muy difícil</span></div></div>
-  ${s.difficultyAI?`<div class="card" style="gap:4px;padding:12px 14px;margin-top:-6px"><span class="eyebrow">Dificultad estimada: ${s.difficultyAI}/5 · ${DIFF[s.difficultyAI-1]}</span>${s.difficultyNote?`<span class="muted" style="font-size:.88rem">${esc(s.difficultyNote)}</span>`:''}${s.difficulty!==s.difficultyAI?`<span class="savestate">Has puesto ${s.difficulty}/5. <button class="ghost" data-diff="${s.difficultyAI}" style="min-height:0;padding:0;font-size:.85rem;text-decoration:underline">Usar ${s.difficultyAI}</button></span>`:''}</div>`:''}
+  ${s.difficultyAI?`<div class="card" style="gap:4px;padding:12px 14px;margin-top:-6px"><span class="eyebrow">Dificultad estimada: ${s.difficultyAI}/5 · ${DIFF[s.difficultyAI-1]}</span>${s.difficultyNote?`<span class="muted tx" style="font-size:.88rem">${tx(s.difficultyNote)}</span>`:''}${s.difficulty!==s.difficultyAI?`<span class="savestate">Has puesto ${s.difficulty}/5. <button class="ghost" data-diff="${s.difficultyAI}" style="min-height:0;padding:0;font-size:.85rem;text-decoration:underline">Usar ${s.difficultyAI}</button></span>`:''}</div>`:''}
   ${(()=>{const P=prioParts(s),auto=isPrioAuto(s),cur=effPrio(s);return `<div class="stack" style="gap:6px"><div class="row" style="justify-content:space-between"><span class="eyebrow">Prioridad${auto?' · automática':' · a mano'}</span>${auto?'':`<button class="ghost" data-prioauto style="min-height:0;padding:2px 4px;font-size:.85rem;text-decoration:underline">Volver a automática</button>`}</div><div class="seg">${[1,2,3,4,5].map(n=>`<button data-prio="${n}" aria-pressed="${cur===n}" aria-label="Prioridad ${PRIO[n-1]}">${n}</button>`).join('')}</div><div class="seg-l"><span>Mínima</span><span>${PRIO[cur-1]}</span><span>Máxima</span></div>
   <div class="prioauto">${auto?(P.n==null?(P.past?'<span>El examen ya ha pasado.</span>':'<span>Pon la fecha del examen para que la prioridad se ajuste sola.</span>'):`<span>Hoy vale <strong>${P.v}</strong>: parte de 3, ${P.prox>0?'+'+P.prox:P.prox<0?'−'+(-P.prox):'±0'} porque el examen es ${until(s.exam)}${P.dif?` y ${P.dif>0?'+':'−'}${Math.abs(P.dif)} por la dificultad (${s.difficulty}/5)`:''}.</span><span class="muted">Sube sola al acercarse el examen: más de 20 días −2 · 11-20 días −1 · 6-10 días ±0 · 3-5 días +1 · 2 días o menos +2. Cada día del plan usa la suya. Toca un número para fijarla a mano.</span>`):`<span>Fijada a mano en ${s.priority}. La automática hoy sería ${P.v}.</span>`}</div></div>`})()}
   <div class="stack" style="gap:6px"><span class="eyebrow">Color</span><div class="colors">${COLORS.map(c=>`<button style="--c:${c}" data-color="${c}" aria-pressed="${s.color===c}" aria-label="Color"></button>`).join('')}</div></div>
@@ -919,13 +921,13 @@ function renderSheet(){
   <section class="card"><div class="row" style="justify-content:space-between"><h2>${s.analysis?'Conceptos a dominar':'Temario'}</h2><span class="num muted">${fmtH(tot)}${reviewHours(s)?' + repaso '+fmtH(reviewHours(s)):''}</span></div>
   ${s.analysis?'<span class="muted" style="font-size:.85rem">Ordenados en el orden en que conviene estudiarlos.</span>':''}
   ${s.topics.length?`<div class="row muted" style="font-size:.75rem;justify-content:flex-end;gap:4px"><span>Horas estimadas</span></div>`:''}
-  ${s.topics.map(t=>`<div class="topic"><input type="checkbox" data-tdone="${t.id}" ${(+t.studied||0)>=(+t.hours||0)&&t.hours>0?'checked':''} aria-label="Concepto terminado"><div class="nm">${esc(t.name)}${t.kind||t.importance?`<div class="row" style="gap:6px;margin-top:4px">${kindChip(t)}${impDots(t)}</div>`:''}${t.freq?`<small>En exámenes: ${esc(t.freq)}</small>`:''}${t.focus?`<details><summary>Qué dominar</summary><div class="readable" role="button" tabindex="0" data-detail="${t.id}" data-dsid="${s.id}"><p class="tx">${tx(t.focus)}</p>${t.where?`<p class="where tx">Apuntes: ${tx(t.where)}</p>`:''}<span class="readhint">Toca para leerlo en grande ↗</span></div></details>`:''}${t.studied>0?`<small>${fmtH(Math.min(t.studied,t.hours))} estudiadas</small>`:''}</div><input id="th-${t.id}" type="number" min="0.5" step="0.5" value="${t.hours}" data-th="${t.id}" aria-label="Horas para ${esc(t.name)}"><button class="ghost" data-tdel="${t.id}" aria-label="Quitar tema">✕</button></div>`).join('')||'<span class="muted">Todavía no hay temas.</span>'}
+  ${s.topics.map(t=>`<div class="topic"><input type="checkbox" data-tdone="${t.id}" ${(+t.studied||0)>=(+t.hours||0)&&t.hours>0?'checked':''} aria-label="Concepto terminado"><div class="nm tx">${tx(t.name)}${t.kind||t.importance?`<div class="row" style="gap:6px;margin-top:4px">${kindChip(t)}${impDots(t)}</div>`:''}${t.freq?`<small class="tx">En exámenes: ${tx(t.freq)}</small>`:''}${t.focus?`<details><summary>Qué dominar</summary><div class="readable" role="button" tabindex="0" data-detail="${t.id}" data-dsid="${s.id}"><p class="tx">${tx(t.focus)}</p>${t.where?`<p class="where tx">Apuntes: ${tx(t.where)}</p>`:''}<span class="readhint">Toca para leerlo en grande ↗</span></div></details>`:''}${t.studied>0?`<small>${fmtH(Math.min(t.studied,t.hours))} estudiadas</small>`:''}</div><input id="th-${t.id}" type="number" min="0.5" step="0.5" value="${t.hours}" data-th="${t.id}" aria-label="Horas para ${esc(plainTx(t.name))}"><button class="ghost" data-tdel="${t.id}" aria-label="Quitar tema">✕</button></div>`).join('')||'<span class="muted">Todavía no hay temas.</span>'}
   <label class="f" for="newtopics">Añadir temas <span class="muted" style="font-weight:400">uno por línea, o pega el índice del temario tal cual</span></label>
   <textarea id="newtopics" placeholder="Tema 1. Semiconductores&#10;Tema 2. El diodo&#10;Tema 3. Transistor BJT">${esc(draft)}</textarea>
   <div class="row"><button data-addtopics>Añadir tal cual</button><button class="mark" data-ai>Dividir y estimar horas</button></div>
   <span class="muted" style="font-size:.85rem">«Dividir y estimar» agrupa los apartados en temas y calcula las horas según la dificultad y los apartados de cada tema. Funciona sin conexión.</span>
   <div id="aimsg" class="muted" style="font-size:.9rem"></div></section>
-  ${s.omitted?.length?`<section class="card"><h2>Lo que puedes saltarte</h2><span class="muted" style="font-size:.9rem">Partes del temario que no han aparecido en los exámenes analizados. Échales un vistazo solo si te sobra tiempo.</span><ul class="omit">${s.omitted.map(o=>`<li>${esc(o)}</li>`).join('')}</ul></section>`:''}
+  ${s.omitted?.length?`<section class="card"><h2>Lo que puedes saltarte</h2><span class="muted" style="font-size:.9rem">Partes del temario que no han aparecido en los exámenes analizados. Échales un vistazo solo si te sobra tiempo.</span><ul class="omit">${s.omitted.map(o=>`<li class="tx">${tx(o)}</li>`).join('')}</ul></section>`:''}
   <div id="delbox"><button class="danger" data-delsub>Eliminar asignatura</button></div>
   </main>`;
   sh.hidden=false;document.body.style.overflow='hidden';
@@ -1050,7 +1052,7 @@ document.addEventListener('click',e=>{
   if(ds.tdel){s.topics=s.topics.filter(t=>t.id!==ds.tdel);save();return renderSheet()}
   if('addtopics' in ds)return addTopicsManual();
   if('ai' in ds)return runAI();
-  if('delsub' in ds){$('#delbox').innerHTML=`<div class="stack"><span>¿Eliminar ${esc(s.name||'esta asignatura')} y todo su progreso?</span><div class="row"><button class="danger" data-delok>Sí, eliminar</button><button data-delno>Cancelar</button></div></div>`;return}
+  if('delsub' in ds){$('#delbox').innerHTML=`<div class="stack"><span>¿Eliminar ${s.name?tx(s.name):'esta asignatura'} y todo su progreso?</span><div class="row"><button class="danger" data-delok>Sí, eliminar</button><button data-delno>Cancelar</button></div></div>`;return}
   if('delok' in ds){state.subjects=state.subjects.filter(x=>x.id!==s.id);save();toast('Asignatura eliminada');return closeEditor()}
   if('delno' in ds)return renderSheet();
 });
