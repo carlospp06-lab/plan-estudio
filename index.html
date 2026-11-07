@@ -160,7 +160,8 @@ body.has-timerbar .toast{bottom:calc(128px + env(safe-area-inset-bottom,0px))}
 <div class="toast" id="toast" hidden></div>
 
 <script>
-const COLORS=['#3D7EDB','#D9534F','#2E9E6B','#9B59B6','#E08A1E','#1F9FB0','#C2477A','#7A8A2E'];
+const COLORS=['#3D7EDB','#D9534F','#2E9E6B','#9B59B6','#E08A1E','#1F9FB0','#C2477A','#7A8A2E','#E5B700'];
+const COLOR_NAMES={'#3D7EDB':'Azul','#D9534F':'Rojo','#2E9E6B':'Verde','#9B59B6':'Morado','#E08A1E':'Naranja','#1F9FB0':'Turquesa','#C2477A':'Rosa','#7A8A2E':'Oliva','#E5B700':'Amarillo'};
 const DOW=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
 const DIFF=['Muy fácil','Fácil','Normal','Difícil','Muy difícil'];
 const PRIO=['Mínima','Baja','Media','Alta','Máxima'];
@@ -539,7 +540,7 @@ function splitButton(d,items){
    Los datos viven en este dispositivo (localStorage), separados del código de la app.
    Al actualizar la app solo cambia el código: los datos se leen igual y, si el formato
    cambia, migrate() los convierte. Antes de migrar se guarda una copia intacta. */
-const APP_VERSION='1.17.0';
+const APP_VERSION='1.18.0';
 const SCHEMA=1;
 const KEY='plan-estudio';
 let saveTimer=null;
@@ -781,7 +782,7 @@ function openDetail(sid,tid){
   const title=t?t.name:'Análisis de exámenes';
   const parts=t?[t.focus&&{h:'Qué dominar',b:t.focus},t.freq&&{h:'En exámenes',b:t.freq},t.where&&{h:'Dónde está en los apuntes',b:t.where}].filter(Boolean):[{h:'',b:s.analysis},...(s.omitted?.length?[{h:'Lo que puedes saltarte',b:s.omitted.map(x=>'• '+x).join('\n')}]:[])];
   $('#detail').innerHTML=`<main><div class="sheethead"><button class="ghost" data-detailclose>← Volver</button><button class="primary" data-detailcopy>Copiar</button></div>
-    <header class="stack" style="gap:6px"><span class="eyebrow" style="color:${s.color}">${tx(s.name)}</span><h1 class="tx" style="font-size:1.6rem">${tx(title)}</h1>${t&&(t.kind||t.importance)?`<div class="row" style="gap:6px">${kindChip(t)}${impDots(t)}</div>`:''}</header>
+    <header class="stack" style="gap:6px"><span class="eyebrow row" style="gap:6px"><span class="dot" style="background:${s.color};width:10px;height:10px"></span>${tx(s.name)}</span><h1 class="tx" style="font-size:1.6rem">${tx(title)}</h1>${t&&(t.kind||t.importance)?`<div class="row" style="gap:6px">${kindChip(t)}${impDots(t)}</div>`:''}</header>
     <section class="card body">${parts.map(x=>`${x.h?`<span class="eyebrow">${tx(x.h)}</span>`:''}${String(x.b).split(/\n+/).map(par=>`<p class="tx">${tx(par)}</p>`).join('')}`).join('')}</section></main>`;
   $('#detail').hidden=false;document.body.style.overflow='hidden';$('#detail').scrollTop=0;
   setTimeout(()=>$('#detail [data-detailclose]')?.focus(),30);
@@ -916,7 +917,7 @@ function renderSheet(){
   ${s.difficultyAI?`<div class="card" style="gap:4px;padding:12px 14px;margin-top:-6px"><span class="eyebrow">Dificultad estimada: ${s.difficultyAI}/5 · ${DIFF[s.difficultyAI-1]}</span>${s.difficultyNote?`<span class="muted tx" style="font-size:.88rem">${tx(s.difficultyNote)}</span>`:''}${s.difficulty!==s.difficultyAI?`<span class="savestate">Has puesto ${s.difficulty}/5. <button class="ghost" data-diff="${s.difficultyAI}" style="min-height:0;padding:0;font-size:.85rem;text-decoration:underline">Usar ${s.difficultyAI}</button></span>`:''}</div>`:''}
   ${(()=>{const P=prioParts(s),auto=isPrioAuto(s),cur=effPrio(s);return `<div class="stack" style="gap:6px"><div class="row" style="justify-content:space-between"><span class="eyebrow">Prioridad${auto?' · automática':' · a mano'}</span>${auto?'':`<button class="ghost" data-prioauto style="min-height:0;padding:2px 4px;font-size:.85rem;text-decoration:underline">Volver a automática</button>`}</div><div class="seg">${[1,2,3,4,5].map(n=>`<button data-prio="${n}" aria-pressed="${cur===n}" aria-label="Prioridad ${PRIO[n-1]}">${n}</button>`).join('')}</div><div class="seg-l"><span>Mínima</span><span>${PRIO[cur-1]}</span><span>Máxima</span></div>
   <div class="prioauto">${auto?(P.n==null?(P.past?'<span>El examen ya ha pasado.</span>':'<span>Pon la fecha del examen para que la prioridad se ajuste sola.</span>'):`<span>Hoy vale <strong>${P.v}</strong>: parte de 3, ${P.prox>0?'+'+P.prox:P.prox<0?'−'+(-P.prox):'±0'} porque el examen es ${until(s.exam)}${P.dif?` y ${P.dif>0?'+':'−'}${Math.abs(P.dif)} por la dificultad (${s.difficulty}/5)`:''}.</span><span class="muted">Sube sola al acercarse el examen: más de 20 días −2 · 11-20 días −1 · 6-10 días ±0 · 3-5 días +1 · 2 días o menos +2. Cada día del plan usa la suya. Toca un número para fijarla a mano.</span>`):`<span>Fijada a mano en ${s.priority}. La automática hoy sería ${P.v}.</span>`}</div></div>`})()}
-  <div class="stack" style="gap:6px"><span class="eyebrow">Color</span><div class="colors">${COLORS.map(c=>`<button style="--c:${c}" data-color="${c}" aria-pressed="${s.color===c}" aria-label="Color"></button>`).join('')}</div></div>
+  <div class="stack" style="gap:6px"><span class="eyebrow">Color</span><div class="colors">${COLORS.map(c=>`<button style="--c:${c}" data-color="${c}" aria-pressed="${s.color===c}" aria-label="Color ${COLOR_NAMES[c]||''}" title="${COLOR_NAMES[c]||''}"></button>`).join('')}</div></div>
   ${s.analysis?`<section class="card analysis readable" role="button" tabindex="0" data-detail="__analysis" data-dsid="${s.id}" style="margin-inline:0"><span class="eyebrow">Análisis de exámenes</span><p class="tx">${tx(s.analysis)}</p><span class="readhint">Toca para leerlo en grande ↗</span></section>`:''}
   <section class="card"><div class="row" style="justify-content:space-between"><h2>${s.analysis?'Conceptos a dominar':'Temario'}</h2><span class="num muted">${fmtH(tot)}${reviewHours(s)?' + repaso '+fmtH(reviewHours(s)):''}</span></div>
   ${s.analysis?'<span class="muted" style="font-size:.85rem">Ordenados en el orden en que conviene estudiarlos.</span>':''}
